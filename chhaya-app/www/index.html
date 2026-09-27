@@ -2102,6 +2102,7 @@ const Hardware = (() => {
   async function startNative() {
     if (nativeStarted) return; nativeStarted = true;
     Native.on("boxLine", (d) => d && d.line && feed(d.line + "\n"));
+    Native.on("boxLog", (d) => d && d.msg && Diag.add("box: " + d.msg));
     Native.on("boxState", (d) => d && onNativeState(d.state));
     try { const s = await Native.call("boxStart"); onNativeState(s.state); } catch (e) { console.warn("[Chhaya] box start", e); nativeStarted = false; }
   }
@@ -2509,8 +2510,8 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
-          `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
+        txt.textContent = `v30.2${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+          `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
   },

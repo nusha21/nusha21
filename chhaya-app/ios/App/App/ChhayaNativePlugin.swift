@@ -103,6 +103,9 @@ public class ChhayaNativePlugin: CAPPlugin, CAPBridgedPlugin {
         },
         onLine: { [weak self] line in
             self?.notifyListeners("boxLine", data: ["line": line])
+        },
+        onLog: { [weak self] msg in
+            self?.notifyListeners("boxLog", data: ["msg": msg])
         })
 
     // MARK: - App info
@@ -210,6 +213,9 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     private let onState: (String, String) -> Void
     private let onLine: (String) -> Void
+    private let onLog: (String) -> Void
+    private var watchdog: Timer?
+    private var attemptStarted: [UUID: Date] = [:]
 
     private var central: CBCentralManager?
     private var candidates: [UUID: CBPeripheral] = [:]   // strong refs while connecting
@@ -221,10 +227,17 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     private var outQueue: [Data] = []
     private var writing = false
 
-    init(onState: @escaping (String, String) -> Void, onLine: @escaping (String) -> Void) {
+    init(onState: @escaping (String, String) -> Void, onLine: @escaping (String) -> Void,
+         onLog: @escaping (String) -> Void) {
         self.onState = onState
         self.onLine = onLine
+        self.onLog = onLog
         super.init()
+    }
+
+    private func log(_ msg: String) {
+        print("[Chhaya box] \(msg)")
+        onLog(msg)
     }
 
     func start() {
@@ -233,6 +246,19 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
             CBCentralManagerOptionShowPowerAlertKey: true,
             CBCentralManagerOptionRestoreIdentifierKey: "chhaya-box-central",
         ])
+        // Never give up: while not connected, look again every 8 s, and drop connection
+        // attempts that have been hanging for more than 12 s.
+        watchdog = Timer.scheduledTimer(withTimeInterval: 8, repeats: true) { [weak self] _ in
+            guard let self = self, self.peripheral == nil, let c = self.central, c.state == .poweredOn else { return }
+            let now = Date()
+            for (id, p) in self.candidates where now.timeIntervalSince(self.attemptStarted[id] ?? now) > 12 {
+                self.log("connection to \(p.name ?? "box") timed out, trying again")
+                c.cancelPeripheralConnection(p)
+                self.candidates.removeValue(forKey: id)
+                self.attemptStarted.removeValue(forKey: id)
+            }
+            self.search(rescan: true)
+        }
     }
 
     func status() -> [String: Any] {
@@ -284,9 +310,11 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         writing = false
     }
 
-    private func search() {
+    private func search(rescan: Bool = false) {
         guard let c = central, c.state == .poweredOn, peripheral == nil else { return }
         setState("searching")
+        // A scan reports each box only once, so restart it to hear the box again after a failure.
+        if rescan && c.isScanning { c.stopScan() }
         for p in restored where p.state == .connected { connect(p) }
         restored.removeAll()
         for p in c.retrieveConnectedPeripherals(withServices: [Self.service]) { connect(p) }
@@ -300,7 +328,9 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     private func connect(_ p: CBPeripheral) {
         guard peripheral == nil, candidates[p.identifier] == nil else { return }
+        log("connecting to \(p.name ?? p.identifier.uuidString.prefix(8).description)")
         candidates[p.identifier] = p
+        attemptStarted[p.identifier] = Date()
         p.delegate = self
         central?.connect(p, options: nil)
     }
@@ -308,6 +338,9 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     // MARK: CBCentralManagerDelegate
 
     func centralManagerDidUpdateState(_ c: CBCentralManager) {
+        let names: [CBManagerState: String] = [.poweredOn: "on", .poweredOff: "off", .unauthorized: "not allowed",
+                                               .unsupported: "unsupported", .resetting: "resetting", .unknown: "starting"]
+        log("iPad Bluetooth: \(names[c.state] ?? "?")")
         switch c.state {
         case .poweredOn: search()
         case .unauthorized: resetLink(); setState("unauthorized")
@@ -325,21 +358,34 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
+        if candidates[p.identifier] == nil && peripheral == nil {
+            log("found \((advertisementData[CBAdvertisementDataLocalNameKey] as? String) ?? p.name ?? "a box") (signal \(RSSI))")
+        }
         connect(p)
     }
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
+        log("connected, reading the box's services")
         p.discoverServices([Self.service])
     }
 
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
+        log("connection failed: \(error?.localizedDescription ?? "unknown")")
         candidates.removeValue(forKey: p.identifier)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.search() }
+        attemptStarted.removeValue(forKey: p.identifier)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.search(rescan: true) }
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         candidates.removeValue(forKey: p.identifier)
-        guard p.identifier == peripheral?.identifier else { return }
+        attemptStarted.removeValue(forKey: p.identifier)
+        guard p.identifier == peripheral?.identifier else {
+            // Dropped before it was ready (often a stale pairing on the iPad): try again.
+            log("box disconnected before it was ready: \(error?.localizedDescription ?? "no reason given")")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.search(rescan: true) }
+            return
+        }
+        log("box disconnected: \(error?.localizedDescription ?? "no reason given")")
         resetLink()
         setState("searching")
         // Reconnects by itself as soon as the box is back in range / powered on.
@@ -351,6 +397,7 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         guard let svc = p.services?.first(where: { $0.uuid == Self.service }) else {
+            log("that device has no Chhaya service\(error.map { ": \($0.localizedDescription)" } ?? "")")
             // Not a Chhaya box after all.
             candidates.removeValue(forKey: p.identifier)
             central?.cancelPeripheralConnection(p)
@@ -380,11 +427,13 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
         guard ch.uuid == Self.txChar, p.identifier == peripheral?.identifier else { return }
         if let error = error {
-            print("[Chhaya] box notify failed: \(error)")
+            log("box notify failed: \(error.localizedDescription)")
             central?.cancelPeripheralConnection(p)
             return
         }
         UserDefaults.standard.set(p.identifier.uuidString, forKey: Self.savedKey)
+        log("box ready ✓")
+        attemptStarted.removeAll()
         central?.stopScan()
         for (id, other) in candidates where id != p.identifier { central?.cancelPeripheralConnection(other) }
         candidates = [p.identifier: p]
