@@ -315,7 +315,8 @@ main{padding:clamp(18px,4vh,48px) 0 clamp(16px,3vh,32px);min-width:0}
 .hwchip{height:48px;padding:0 16px;border-radius:24px;background:#F2F3F5;font-size:var(--t-s);font-weight:700;display:flex;align-items:center;gap:6px}
 .hwchip.on{background:#E1F7EE;color:#1F8A5B}
 .start-card .hwbtn{display:block;margin:16px auto 0;font-size:var(--t-s);font-weight:700;color:#2a8f84;text-decoration:underline}
-.boxset{text-align:left;max-width:600px}
+.overlay[data-overlay="box"]{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-top:12px}
+.boxset{text-align:left;max-width:600px;margin-bottom:24px}
 .boxset h2{text-align:center}
 .boxset .st{display:flex;justify-content:space-between;gap:12px;font-size:var(--t-s);padding:10px 0;border-bottom:1px solid #eee}
 .boxset .st b{font-weight:800}
@@ -2376,12 +2377,12 @@ const BoxSettings = {
       <div class="st"><span>Bluetooth</span><b id="boxBt" class="${st.btCls}">${esc(st.bt)}</b></div>
       <div class="st"><span>WiFi (बैकअप)</span><b id="boxWifi" class="${st.wCls}">${esc(st.wText)}</b></div>
       <label for="boxSsid">WiFi का नाम</label>
-      <input id="boxSsid" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(st.cur)}">
+      <input id="boxSsid" type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next" value="${esc(st.cur)}">
       <label for="boxPass">WiFi पासवर्ड</label>
-      <div class="pw"><input id="boxPass" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" value=""><button class="tap" data-act="boxPwToggle">👁</button></div>
+      <div class="pw"><input id="boxPass" type="text" inputmode="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done" value=""><button class="tap" data-act="boxPwToggle">🙈</button></div>
+      <div class="row" style="margin-top:14px"><button class="yes tap" data-act="boxSave">WiFi सेव करें</button></div>
       <div class="note">बॉक्स इसे सेव कर लेता है; जब चाहें बदल सकते हैं। सिर्फ़ 2.4 GHz WiFi चलता है।</div>
       <div class="row">
-        <button class="yes tap" data-act="boxSave">WiFi सेव करें</button>
         <button class="no tap" data-act="boxTest">LED टेस्ट</button>
         ${hw.hasNative ? '<button class="no tap" data-act="boxForget">दूसरा बॉक्स</button>' : ""}
         <button class="no tap" data-act="diagToggle">${store.get("diag", false) ? "Diagnostics बंद" : "Diagnostics"}</button>
@@ -2389,6 +2390,15 @@ const BoxSettings = {
       </div>
     </div></div>`;
     if (hw.connected) hw.askWifi();
+    // Keep the form inside the part of the screen the keyboard leaves free.
+    const o = document.querySelector('[data-overlay="box"]'), vv = window.visualViewport;
+    if (vv && o) {
+      const fit = () => { if (!document.body.contains(o)) return vv.removeEventListener("resize", fit); o.style.height = vv.height + "px"; o.style.top = vv.offsetTop + "px"; o.style.bottom = "auto"; };
+      vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit();
+    }
+    o && o.addEventListener("focusin", (e) => { if (e.target.matches("input")) setTimeout(() => e.target.scrollIntoView({ block: "center", behavior: "smooth" }), 350); });
+    o && o.querySelector("#boxSsid").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); o.querySelector("#boxPass").focus(); } });
+    o && o.querySelector("#boxPass").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); o.querySelector('[data-act="boxSave"]').click(); } });
   },
 };
 
@@ -2482,7 +2492,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v29.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v29.2${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
@@ -2530,7 +2540,7 @@ document.addEventListener("click", (e) => {
         if (ok) { $("#boxPass").value = ""; toast("WiFi बॉक्स को भेज दिया — जुड़ने में 10–20 सेकंड लगते हैं"); }
         break;
       }
-      case "boxPwToggle": { const i = $("#boxPass"); i.type = i.type === "password" ? "text" : "password"; break; }
+      case "boxPwToggle": { const i = $("#boxPass"); const hide = i.type !== "password"; i.type = hide ? "password" : "text"; act.textContent = hide ? "👁" : "🙈"; break; }
       case "boxTest": Hardware.testLeds(); break;
       case "boxForget": Hardware.forget(); break;
       case "diagToggle": store.set("diag", !store.get("diag", false)); location.reload(); break;
