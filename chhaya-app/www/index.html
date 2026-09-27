@@ -1436,7 +1436,8 @@ const Assistant = {
     return final;
   },
   async act(r) {
-    if (r.action === "play_music" && r.videoId) { Music.play({ videoId: r.videoId, title: r.title, trackId: r.trackId }); go("#music"); Data.loadTracks(); }
+    if (r.action === "play_music" && r.videoId) { Music.play({ videoId: r.videoId, title: r.title, trackId: r.trackId, asked: r.title || r.transcript || "" }); go("#music"); Data.loadTracks(); }
+    else if (r.action === "play_music") { Music.playByTitle(r.title || r.query || r.transcript || ""); go("#music"); }
     else if (r.action === "take_photo") { go("#camera"); await Camera.countdownShot(r.countdown || 3); }
     else if (r.action === "reminder_set") { Data.loadReminders(); }
     else if (r.action === "call") {
@@ -1884,7 +1885,7 @@ const Music = {
           width: "100%", height: "100%", playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, enablejsapi: 1, origin: location.origin, widget_referrer: location.href },
           events: { onReady: () => resolve(this.player), onStateChange: (e) => this.onState(e.data),
             // 2 bad id, 5 player error, 100 removed, 101/150 embedding not allowed, 153 page origin not accepted
-            onError: (e) => { Diag.add("YouTube error " + e.data); if (e.data === 101 || e.data === 150) { toast("यह गाना यहाँ नहीं चल सकता — अगला चला रही हूँ"); this.next(); } else toast("गाना नहीं चल पाया"); } },
+            onError: (e) => this.onError(e.data) },
         });
       };
       const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s);
@@ -1896,13 +1897,31 @@ const Music = {
     const p = await this.load(); p.loadVideoById(song.videoId); p.setVolume(this.vol());
     this.syncUI();
   },
-  async playByTitle(title) {
+  async playByTitle(title, tries = 0, blocked = [], asked = title) {
     try {
-      toast("गाना ढूँढ रही हूँ…");
+      if (!tries) toast("गाना ढूँढ रही हूँ…");
       const r = await API.voice({ mode: "music_search", query: title });
-      if (r.videoId) { this.play({ videoId: r.videoId, title: r.title, trackId: r.trackId }); Data.loadTracks(); }
+      if (r.videoId && !blocked.includes(r.videoId)) { this.play({ videoId: r.videoId, title: r.title, trackId: r.trackId, asked, tries, blocked }); Data.loadTracks(); }
+      else if (r.videoId) this.tryOtherVersion({ asked, tries, blocked });
       else toast(r.error || "गाना नहीं मिला");
     } catch (e) { toast("गाना नहीं मिल पाया"); }
+  },
+  /* Many official film songs don't allow playing outside YouTube (errors 101/150): look for
+     another upload of the same song ("lyrics", "audio"...), which usually allows it. */
+  tryOtherVersion(song) {
+    const variants = ["lyrics", "audio song", "full song"];
+    const tries = (song.tries || 0) + 1, asked = song.asked || song.title || "";
+    const blocked = [...(song.blocked || []), song.videoId].filter(Boolean);
+    if (!asked || tries > variants.length) { toast("माफ़ कीजिए, यह गाना यहाँ नहीं चल सकता"); this.stop(); return; }
+    Diag.add(`song blocked by its owner, trying “${asked} ${variants[tries - 1]}”`);
+    this.playByTitle(`${asked} ${variants[tries - 1]}`.trim(), tries, blocked, asked);
+  },
+  onError(code) {
+    Diag.add("YouTube error " + code + (this.current ? " for " + this.current.videoId : ""));
+    const song = this.current;
+    if ((code === 101 || code === 150 || code === 100) && song && song.asked) return this.tryOtherVersion(song);
+    if (code === 101 || code === 150 || code === 100) { toast("यह गाना यहाँ नहीं चल सकता — अगला चला रही हूँ"); return this.next(); }
+    toast("गाना नहीं चल पाया");
   },
   onState(s) { this.playing = s === 1; if (s === 0) this.next(); this.syncUI(); },
   toggle() { if (!this.player || !this.current) return; this.playing ? this.player.pauseVideo() : this.player.playVideo(); },
@@ -2519,7 +2538,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.3${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.4${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
