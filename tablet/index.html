@@ -1103,7 +1103,9 @@ const Mic = {
         if (fin) return; fin = true; clearTimeout(hard);
         if (this._cancel === cancel) this._cancel = null;
         try { src.disconnect(); } catch (e) {} const b = buddy(); if (b) b.style.setProperty("--lvl", 0);
-        resolve(ok && spoke && voiced >= minSpeechMs && chunks.length ? new Blob(chunks, { type: rec.mimeType || "audio/webm" }) : null);
+        const blob = ok && spoke && voiced >= minSpeechMs && chunks.length ? new Blob(chunks, { type: rec.mimeType || "audio/webm" }) : null;
+        if (blob) { Mic.lastClip = blob; Diag.add(`clip ${Math.round(blob.size / 1024)}KB ${blob.type} voiced ${Math.round(voiced)}ms of ${Math.round(performance.now() - t0)}ms`); }
+        resolve(blob);
       };
       const cancel = () => { spoke = false; try { if (rec.state === "recording") rec.stop(); } catch (e) {} setTimeout(() => finish(false), 700); };
       this._cancel = cancel;
@@ -2384,11 +2386,23 @@ const Health = {
     if (QS.has("debug") || Native.available) {
       const d = document.createElement("div"); d.id = "dbg";
       d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;font:11px/1.35 monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:6px;max-width:70vw;white-space:pre-wrap";
-      d.title = "tap to hide";
-      d.addEventListener("click", (e) => { e.stopPropagation(); d.style.display = "none"; });
+      const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;margin-bottom:4px";
+      bar.innerHTML = '<button data-dbg="play" style="background:#0f0;color:#000;border-radius:6px;padding:4px 10px;font:bold 13px sans-serif">▶ play last clip</button><button data-dbg="hide" style="background:#444;color:#fff;border-radius:6px;padding:4px 10px;font:13px sans-serif">hide</button>';
+      const txt = document.createElement("div");
+      d.append(bar, txt);
+      d.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const b = e.target.closest("[data-dbg]"); if (!b) return;
+        if (b.dataset.dbg === "hide") { d.style.display = "none"; return; }
+        if (!Mic.lastClip) { Diag.add("no clip recorded yet"); return; }
+        const a = new Audio(URL.createObjectURL(Mic.lastClip)); a.volume = 1;
+        a.onloadedmetadata = () => Diag.add(`playing clip, ${isFinite(a.duration) ? a.duration.toFixed(1) + "s" : "unknown length"}`);
+        a.onerror = () => Diag.add("clip can't be played: " + ((a.error && a.error.code) || "?"));
+        a.play().catch((err) => Diag.add("play failed " + err.message));
+      });
       document.body.appendChild(d);
       setInterval(() => {
-        d.textContent = `v27.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v27.2${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
