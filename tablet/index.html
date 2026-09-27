@@ -1222,7 +1222,7 @@ const Wake = (() => {
     Assistant.onWake(rest.length >= 3 ? rest : "");
   }
   /* ---- iPad app: Apple's on-device recogniser, like "Hey Siri" ---- */
-  let nativeOn = false, nativeFailed = false, nativeText = "", nativeHooked = false;
+  let nativeOn = false, nativeFailed = false, nativeText = "", nativeHooked = false, nativeTries = 0, nativeFailedAt = 0, nativePermanent = false;
   const useNative = () => Native.available && !nativeFailed && CONFIG.wakeMode !== "server";
   function nativeRun() {
     if (!useNative() || nativeOn || !want || paused > 0 || Assistant.busy || Calls.inCall() || Calls.incomingCall || !state.started) return;
@@ -1240,10 +1240,14 @@ const Wake = (() => {
     nativeOn = true; nativeText = ""; updateHint();
     Native.call("wakeStart", { locale: "hi-IN", hints: CONFIG.wakeWords }).then((r) => {
       if (r && r.error) {
+        nativeOn = false;
+        // The microphone can be busy for a moment (camera check, a call ending, Siri): try again.
+        const transient = /microphone|audio session|not started/i.test(r.error);
+        if (transient && ++nativeTries < 6) { Diag.add(`wake: ${r.error} — retrying (${nativeTries})`); setTimeout(nativeRun, 1500); return; }
         Diag.add("wake (on-device) unavailable: " + r.error + " → server check");
-        nativeOn = false; nativeFailed = true; serverLoop();
-      } else Diag.add("wake: listening on the iPad" + (r && r.onDevice ? " (on-device)" : " (Apple server)"));
-    }).catch((e) => { nativeOn = false; nativeFailed = true; Diag.add("wake start failed: " + e.message); serverLoop(); });
+        nativeFailed = true; nativeFailedAt = Date.now(); nativePermanent = !transient; serverLoop();
+      } else { nativeTries = 0; Diag.add("wake: listening on the iPad" + (r && r.onDevice ? " (on-device)" : " (Apple server)")); }
+    }).catch((e) => { nativeOn = false; nativeFailed = true; nativeFailedAt = Date.now(); Diag.add("wake start failed: " + e.message); serverLoop(); });
   }
   function nativeStop() {
     clearTimeout(pending); pending = null;
@@ -1266,7 +1270,7 @@ const Wake = (() => {
   async function serverLoop() {
     if (looping || !useServer()) return; looping = true; updateHint();
     try {
-      while (want) {
+      while (want && useServer()) {
         lastLoop = Date.now();
         if (paused > 0 || Assistant.busy || Calls.inCall() || Calls.incomingCall || document.hidden || !state.started) { await sleep(300); continue; }
         let blob = null;
@@ -1303,6 +1307,10 @@ const Wake = (() => {
       const quiet = !Assistant.busy && !Calls.inCall() && !Calls.incomingCall;
       if (quiet && paused > 0) { console.warn("wake: stale pause cleared"); paused = 0; }
       if (!quiet || paused > 0) return;
+      // After a temporary microphone problem, go back to on-device listening once a minute.
+      if (nativeFailed && !nativePermanent && Native.available && Date.now() - nativeFailedAt > 60000) {
+        nativeFailed = false; nativeTries = 0; if (looping) Mic.cancel();
+      }
       if (useNative()) { if (!nativeOn) nativeRun(); }
       else if (useServer()) { if (!looping) serverLoop(); else if (lastLoop && Date.now() - lastLoop > 40000) { Mic.cancel(); } }
       else if (!running) run();
@@ -2501,7 +2509,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
