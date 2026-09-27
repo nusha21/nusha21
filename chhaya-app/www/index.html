@@ -2450,6 +2450,13 @@ const Start = {
     const o = document.querySelector('[data-overlay="start"]'); if (o) o.remove();
     Voice.ensure(); try { await Voice.ctx.resume(); } catch (e) {}
     try { await Mic.init(); } catch (e) { toast("माइक की अनुमति नहीं मिली"); }
+    // In the app: ask for the camera once, on this setup tap, so the permission popup never
+    // interrupts Sarla's first video call or photo.
+    if (Native.available && !store.get("camAsked", false) && navigator.mediaDevices) {
+      store.set("camAsked", true);
+      navigator.mediaDevices.getUserMedia({ video: true }).then((s) => s.getTracks().forEach((t) => t.stop()))
+        .catch((e) => Diag.add("camera permission: " + e.name));
+    }
     state.startedAt = Date.now();
     Wake.start(); Realtime.start(); Medicine.start(); Reminders.start(); Health.start();
     Ack.load("hi"); Ack.load("mr"); CheckIn.start();
