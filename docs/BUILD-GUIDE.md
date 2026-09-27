@@ -5,7 +5,7 @@ What's in this repo:
 | Folder | What it is |
 |---|---|
 | `tablet/index.html` | The Chhaya page, **v27**. Upload it to the Vercel project **ipadtest2**. It still works in Chrome as before. |
-| `chhaya-app/` | The iPad app (Capacitor 8). It opens the Chhaya page built into the app (`npm run sync` copies `tablet/index.html` in). |
+| `chhaya-app/` | The iPad app (Capacitor 8). It opens the live page from **https://ipadtest2-six.vercel.app/**; without internet it opens the copy built into the app (`npm run sync` copies `tablet/index.html` in). |
 | `firmware/chhaya_box_ble/` | The new ESP32 button box sketch (Bluetooth LE, with WiFi as a backup). |
 
 Plan on about 1–2 hours the first time. After that, most changes are just a Vercel upload.

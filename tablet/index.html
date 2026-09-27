@@ -410,7 +410,7 @@ const CONFIG = {
 
   /* iPad app (Capacitor): where the live page lives. The app opens this; without internet
      it uses the copy built into the app and comes back here when the internet returns. */
-  app: { remoteUrl: "" },   // e.g. "https://<your-project>.vercel.app/" ("" = stay on the built-in copy)
+  app: { remoteUrl: "https://ipadtest2-six.vercel.app/" },   // "" = always use the copy built into the app
 
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" },
@@ -553,7 +553,7 @@ const API = {
     let timer = setTimeout(() => ctl.abort(), limit);
     const kick = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), 15000); };   // streaming: 15 s without data = dead
     const t0 = performance.now(), tag = fields.mode || (opts.audio ? "question(audio)" : "question");
-    try { const r = await this._voice(fields, opts, ctl.signal, kick); Diag.add(`${tag} ${Math.round(performance.now() - t0)}ms ok${r && r.wake !== undefined ? " wake=" + r.wake : ""}${r && r.transcript ? " “" + r.transcript + "”" : ""}`); return r; }
+    try { const r = await this._voice(fields, opts, ctl.signal, kick); Diag.add(`${tag} ${Math.round(performance.now() - t0)}ms ok${r && r.wake !== undefined ? " wake=" + r.wake : ""}${r && r.transcript ? " “" + r.transcript + "”" : ""}${r && r.videoId ? " video=" + r.videoId : ""}${r && r.error ? " error=" + r.error : ""}`); return r; }
     catch (e) { Diag.add(`${tag} ${Math.round(performance.now() - t0)}ms FAILED ${e.name === "AbortError" ? "timeout" : e.message}`); throw e; }
     finally { clearTimeout(timer); this.live.delete(ctl); }
   },
@@ -1868,7 +1868,9 @@ const Music = {
       window.onYouTubeIframeAPIReady = () => {
         this.player = new YT.Player("ytPlayer", {
           width: "100%", height: "100%", playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
-          events: { onReady: () => resolve(this.player), onStateChange: (e) => this.onState(e.data) },
+          events: { onReady: () => resolve(this.player), onStateChange: (e) => this.onState(e.data),
+            // 2 bad id, 5 player error, 100 removed, 101/150 embedding not allowed, 153 page origin not accepted
+            onError: (e) => { Diag.add("YouTube error " + e.data); if (e.data === 101 || e.data === 150) { toast("यह गाना यहाँ नहीं चल सकता — अगला चला रही हूँ"); this.next(); } else toast("गाना नहीं चल पाया"); } },
         });
       };
       const s = document.createElement("script"); s.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(s);
@@ -2499,7 +2501,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v29.2${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }

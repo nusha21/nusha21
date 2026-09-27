@@ -3,8 +3,10 @@
   "appName": "Chhaya",
   "webDir": "www",
   "server": {
+    "url": "https://ipadtest2-six.vercel.app/",
+    "errorPath": "index.html",
     "allowNavigation": [
-      "ipadtest2.vercel.app"
+      "ipadtest2-six.vercel.app"
     ]
   },
   "ios": {
