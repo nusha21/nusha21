@@ -93,9 +93,11 @@ Add `?debug=1` to the page address, or look at the bottom of the screen, to chec
 
 ## 5. Everyday settings
 
-- **LED patterns:** edit `CONFIG.ledPatterns` in `tablet/index.html` and upload to Vercel. The format is `"effect,RRGGBB colour,cycle ms,brightness 0-255"`. The effects are `off`, `solid`, `breathe`, `pulse`, `blink`, `spin` and `rainbow`. The box gets the new patterns the next time the app connects, and keeps them for its WiFi backup too.
+- **LED patterns:** edit `CONFIG.ledPatterns` in `tablet/index.html` and upload to Vercel. The format is `"effect,RRGGBB colour,cycle ms,brightness 0-255"`. The effects are `off`, `solid`, `breathe`, `pulse`, `blink`, `spin`, `rainbow` and `sweep` (the Chhaya animation). The box gets the new patterns the next time the app connects, and keeps them for its WiFi backup too.
 - **WiFi password changed?** Box settings → type the new one → Save. Buttons and LEDs keep working over Bluetooth in the meantime.
 - **Replaced the ESP32?** Box settings → **दूसरा बॉक्स**. The app forgets the old box and finds the new one.
+- **Volume knob:** it is off in the sketch until the knob is wired. Then set `USE_POT` to `true` and upload again.
+- **Diagnostics box:** Box settings → **Diagnostics** turns it on or off.
 - **Recipient's name.** In Supabase → SQL editor run:
   ```sql
   update care_recipients set name = 'Sarla', greeting_name = 'सरला जी'

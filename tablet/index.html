@@ -393,16 +393,18 @@ const CONFIG = {
   hardware: { deviceId: "69bd0e47-d6fd-4c2b-85c0-979b71908d9d" },
 
   /* LED patterns on the button box, one per Chhaya state:
-     "<effect>,<colour RRGGBB>,<speed: one cycle in ms>,<brightness 0-255>"
-     Effects: off, solid, breathe, pulse, blink, spin, rainbow.
-     Edit, redeploy, and the box picks them up the next time it connects (no re-upload). */
+     "<effect>,<colour RRGGBB>,<speed: one cycle in ms>,<brightness 0-255>[,<head colour for sweep>]"
+     Effects: off, solid, breathe, pulse, blink, spin, rainbow, sweep.
+     sweep = the Chhaya animation: two bright heads run from the top centre down both sides and
+     meet at the bottom, filling the frame (speed = how long the run takes), then it holds.
+     Edit and update the page; the box picks them up the next time it connects (no re-upload). */
   ledPatterns: {
     idle: "off",
-    listening: "breathe,00FF28,1600,200",
-    thinking: "spin,003CFF,1000,200",
-    speaking: "pulse,FFAA00,700,200",
-    ringing: "blink,00C8FF,800,255",
-    reminder: "pulse,FF5A00,1200,220",
+    listening: "sweep,F15822,1500,255,FFF9B5",   // awake / listening
+    thinking: "breathe,8ECB8C,1400,255",
+    speaking: "pulse,57BEEC,700,255",
+    ringing: "blink,57BEEC,800,255",
+    reminder: "pulse,F15822,1200,255",
   },
 
   /* iPad app (Capacitor): where the live page lives. The app opens this; without internet
@@ -2333,6 +2335,7 @@ const BoxSettings = {
         <button class="yes tap" data-act="boxSave">WiFi सेव करें</button>
         <button class="no tap" data-act="boxTest">LED टेस्ट</button>
         ${hw.hasNative ? '<button class="no tap" data-act="boxForget">दूसरा बॉक्स</button>' : ""}
+        <button class="no tap" data-act="diagToggle">${store.get("diag", false) ? "Diagnostics बंद" : "Diagnostics"}</button>
         <button class="no tap" data-act="closeOverlay">बंद करें</button>
       </div>
     </div></div>`;
@@ -2416,7 +2419,7 @@ const Health = {
     document.addEventListener("visibilitychange", () => { if (!document.hidden) this.revive(); });
     addEventListener("pageshow", () => this.revive());
     addEventListener("focus", () => this.revive());
-    if (QS.has("debug") || Native.available) {
+    if (QS.has("debug") || store.get("diag", false)) {
       const d = document.createElement("div"); d.id = "dbg";
       d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:55;font:11px/1.35 monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:6px;max-width:70vw;max-height:34vh;overflow:hidden;white-space:pre-wrap";   // under popups (z 60)
       const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;margin-bottom:4px";
@@ -2486,6 +2489,7 @@ document.addEventListener("click", (e) => {
       case "boxPwToggle": { const i = $("#boxPass"); i.type = i.type === "password" ? "text" : "password"; break; }
       case "boxTest": Hardware.testLeds(); break;
       case "boxForget": Hardware.forget(); break;
+      case "diagToggle": store.set("diag", !store.get("diag", false)); location.reload(); break;
       case "callBack": Calls.startFromContact(id); break;
       case "back": back(); break;
       case "likeMem": state.memLiked = !state.memLiked; store.set("memLiked", state.memLiked); act.innerHTML = I.heart(state.memLiked); break;

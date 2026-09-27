@@ -4,7 +4,7 @@
 //   Button 2 (GPIO4)  -> CALLS  : open the call log
 //   Button 3 (GPIO19) -> HANGUP : cut a call, stop Chhaya talking, pause a song
 //   Knob     (GPIO34) -> iPad system volume (as a Bluetooth volume remote)
-//   LED strip (GPIO27)          : Chhaya's state (listening / thinking / speaking), patterns set by the page
+//   LED strip (GPIO27)          : Chhaya's state (awake/listening / thinking / speaking), patterns set by the page
 //   Status LED (GPIO2)          : on = Chhaya app connected, slow blink = only paired, off = nothing
 //
 // HOW IT TALKS TO THE iPad
@@ -24,7 +24,13 @@
 // LED PATTERNS
 //   The page sends its pattern table (CONFIG.ledPatterns) whenever it connects; the box keeps a
 //   copy so the WiFi backup uses the same patterns. Effects: off, solid, breathe, pulse, blink,
-//   spin, rainbow (each with colour, speed and brightness).
+//   spin, rainbow, sweep (each with colour, speed and brightness).
+//   "sweep" is the Chhaya animation: two bright heads start at the top centre, run down both
+//   sides and meet at the bottom centre, filling the frame with the colour behind them.
+//
+// VOLUME KNOB
+//   Off until a knob is wired (USE_POT). An unconnected input pin reads random values, which
+//   used to change the iPad's volume by itself. Even when on, very jumpy readings are ignored.
 //
 // ---------------------------------------------------------------------
 // BEFORE UPLOADING
@@ -65,10 +71,16 @@
 #define STATUS_LED_PIN    2
 #define POT_PIN           34
 #define NEOPIXEL_PIN      27
+// LED strip laid out as a rectangle, starting at the top centre and running clockwise.
 #define NEOPIXEL_COUNT    72      // number of LEDs on the strip
+#define SWEEP_RIGHT_LEN   36      // LEDs from the top centre down the right side to the bottom centre
+                                  // (if the heads don't meet exactly at the bottom centre, adjust this)
+#define LED_BRIGHTNESS    120     // 0..255, overall limit (patterns scale within it)
 #define DEBOUNCE_MS       250
 
-#define USE_POT           true    // set false if no knob is connected
+#define USE_POT           false   // set true once the volume knob is wired to GPIO34
+#define POT_NOISE_SPREAD  250     // readings spread wider than this = no knob / loose wire: ignored
+#define POT_CONFIRM_READS 3       // a new volume step must be read this many times in a row
 #define VOLUME_STEPS      16
 #define ENDSTOP_RESYNC_PRESSES 20
 
@@ -121,24 +133,27 @@ SemaphoreHandle_t txLock;
 String txPending;
 
 // ---------------- LED patterns ----------------
-enum Effect : uint8_t { FX_OFF, FX_SOLID, FX_BREATHE, FX_PULSE, FX_BLINK, FX_SPIN, FX_RAINBOW };
-const char* const EFFECT_NAMES[] = { "off", "solid", "breathe", "pulse", "blink", "spin", "rainbow" };
-struct Pattern { uint8_t fx; uint8_t r, g, b; uint16_t periodMs; uint8_t brightness; };
+enum Effect : uint8_t { FX_OFF, FX_SOLID, FX_BREATHE, FX_PULSE, FX_BLINK, FX_SPIN, FX_RAINBOW, FX_SWEEP };
+const char* const EFFECT_NAMES[] = { "off", "solid", "breathe", "pulse", "blink", "spin", "rainbow", "sweep" };
+const int EFFECT_COUNT = 8;
+// r,g,b = main colour; hr,hg,hb = the bright moving head of "sweep" (default #FFF9B5)
+struct Pattern { uint8_t fx; uint8_t r, g, b; uint16_t periodMs; uint8_t brightness; uint8_t hr, hg, hb; };
 
 // Chhaya's states. The page can send any of these names.
 const char* const STATE_NAMES[] = { "idle", "listening", "thinking", "speaking", "ringing", "reminder" };
 const int STATE_COUNT = 6;
 Pattern statePatterns[STATE_COUNT] = {
-  { FX_OFF,     0,   0,   0,    0,   0 },   // idle
-  { FX_BREATHE, 0, 255,  40, 1600, 200 },   // listening: green
-  { FX_SPIN,    0,  60, 255, 1000, 200 },   // thinking: blue
-  { FX_PULSE, 255, 170,   0,  700, 200 },   // speaking: yellow
-  { FX_BLINK,   0, 200, 255,  800, 255 },   // ringing: cyan
-  { FX_PULSE, 255,  90,   0, 1200, 220 },   // reminder: orange
+  { FX_OFF,      0,    0,    0,    0,   0, 0xFF, 0xF9, 0xB5 },   // idle
+  { FX_SWEEP, 0xF1, 0x58, 0x22, 1500, 255, 0xFF, 0xF9, 0xB5 },   // awake / listening: #F15822
+  { FX_BREATHE,0x8E, 0xCB, 0x8C, 1400, 255, 0xFF, 0xF9, 0xB5 },   // thinking: #8ECB8C
+  { FX_PULSE, 0x57, 0xBE, 0xEC,  700, 255, 0xFF, 0xF9, 0xB5 },   // speaking: #57BEEC
+  { FX_BLINK, 0x57, 0xBE, 0xEC,  800, 255, 0xFF, 0xF9, 0xB5 },   // ringing
+  { FX_PULSE, 0xF1, 0x58, 0x22, 1200, 255, 0xFF, 0xF9, 0xB5 },   // reminder
 };
 volatile int currentState = 0;
 Pattern directPattern;               // "LEDX:" test pattern from the settings screen
 volatile bool useDirect = false;
+volatile int directSerial = 0;       // counts LEDX commands, so each test restarts its animation
 unsigned long directUntil = 0;
 
 // ---------------- WiFi ----------------
@@ -301,26 +316,28 @@ int stateIndex(const String& s) {
 }
 
 bool parsePattern(const String& spec, Pattern& p) {
-  // effect,RRGGBB,periodMs,brightness  (only the effect is required)
-  String parts[4]; int n = 0, start = 0;
-  for (int i = 0; i <= (int) spec.length() && n < 4; i++) {
+  // effect,RRGGBB,periodMs,brightness[,headRRGGBB]  (only the effect is required)
+  String parts[5]; int n = 0, start = 0;
+  for (int i = 0; i <= (int) spec.length() && n < 5; i++) {
     if (i == (int) spec.length() || spec[i] == ',') { parts[n++] = spec.substring(start, i); start = i + 1; }
   }
   parts[0].trim(); parts[0].toLowerCase();
   int fx = -1;
-  for (int i = 0; i < 7; i++) if (parts[0] == EFFECT_NAMES[i]) fx = i;
+  for (int i = 0; i < EFFECT_COUNT; i++) if (parts[0] == EFFECT_NAMES[i]) fx = i;
   if (fx < 0) return false;
   p.fx = fx;
   uint32_t rgb = n > 1 && parts[1].length() ? strtoul(parts[1].c_str(), nullptr, 16) : 0xFFFFFF;
   p.r = (rgb >> 16) & 0xFF; p.g = (rgb >> 8) & 0xFF; p.b = rgb & 0xFF;
   p.periodMs = n > 2 && parts[2].toInt() > 0 ? constrain(parts[2].toInt(), 100, 20000) : 1000;
   p.brightness = n > 3 && parts[3].length() ? constrain(parts[3].toInt(), 0, 255) : 200;
+  uint32_t head = n > 4 && parts[4].length() ? strtoul(parts[4].c_str(), nullptr, 16) : 0xFFF9B5;
+  p.hr = (head >> 16) & 0xFF; p.hg = (head >> 8) & 0xFF; p.hb = head & 0xFF;
   return true;
 }
 
 String patternToSpec(const Pattern& p) {
-  char buf[40];
-  snprintf(buf, sizeof buf, "%s,%02X%02X%02X,%u,%u", EFFECT_NAMES[p.fx], p.r, p.g, p.b, p.periodMs, p.brightness);
+  char buf[48];
+  snprintf(buf, sizeof buf, "%s,%02X%02X%02X,%u,%u,%02X%02X%02X", EFFECT_NAMES[p.fx], p.r, p.g, p.b, p.periodMs, p.brightness, p.hr, p.hg, p.hb);
   return String(buf);
 }
 
@@ -355,7 +372,7 @@ void handleLine(String line) {
     }
   } else if (line.startsWith("LEDX:")) {
     Pattern p;
-    if (parsePattern(line.substring(5), p)) { directPattern = p; useDirect = true; directUntil = millis() + 5000; }
+    if (parsePattern(line.substring(5), p)) { directPattern = p; directSerial++; useDirect = true; directUntil = millis() + 5000; }
   } else if (line.startsWith("WIFI:")) {
     String rest = line.substring(5);
     int tab = rest.indexOf('\t');
@@ -397,14 +414,47 @@ uint32_t scaled(const Pattern& p, float k) {
   return strip.Color((uint8_t)(p.r * k), (uint8_t)(p.g * k), (uint8_t)(p.b * k));
 }
 
+// Blend two colours: k = 0 -> a, 1 -> b
+uint32_t mix(uint8_t ar, uint8_t ag, uint8_t ab, uint8_t br, uint8_t bg, uint8_t bb, float k) {
+  k = constrain(k, 0.0f, 1.0f);
+  return strip.Color(ar + (br - ar) * k, ag + (bg - ag) * k, ab + (bb - ab) * k);
+}
+
+// The Chhaya animation (from chhaya_animation.ino): two heads leave the top centre, run down
+// both sides and meet at the bottom centre; behind them the frame fills with the main colour,
+// then the heads fade into it and the whole frame holds the colour.
+#define SWEEP_BAND 4        // LEDs in each bright head
+#define SWEEP_FADE_MS 400   // heads fading into the main colour after they meet
+void renderSweep(const Pattern& p, unsigned long elapsed) {
+  const int R = SWEEP_RIGHT_LEN, L = NEOPIXEL_COUNT - SWEEP_RIGHT_LEN;
+  unsigned long total = p.periodMs ? p.periodMs : 1500;
+  int rightHead = elapsed >= total ? R : 1 + (int)((uint64_t) elapsed * R / total);
+  rightHead = min(rightHead, R);
+  int leftHead = (rightHead * L + R / 2) / R;   // left side is shorter: scaled to arrive together
+  float fade = elapsed <= total ? 0 : (float)(elapsed - total) / SWEEP_FADE_MS;   // head -> main
+  uint32_t mainC = strip.Color(p.r, p.g, p.b);
+  uint32_t headC = mix(p.hr, p.hg, p.hb, p.r, p.g, p.b, fade);
+  for (int side = 0; side < 2; side++) {
+    int len = side == 0 ? R : L, head = side == 0 ? rightHead : leftHead;
+    for (int i = 0; i < len; i++) {
+      int idx = side == 0 ? i : NEOPIXEL_COUNT - 1 - i;
+      uint32_t c = i >= head ? 0 : (i >= head - SWEEP_BAND ? headC : mainC);
+      strip.setPixelColor(idx, c);
+    }
+  }
+}
+
 void renderLeds() {
-  static unsigned long last = 0;
+  static unsigned long last = 0, patternStart = 0;
+  static int lastKey = -1;
   unsigned long now = millis();
   if (now - last < 20) return;   // 50 frames a second
   last = now;
   if (useDirect && (long)(now - directUntil) > 0) useDirect = false;
   const Pattern& p = useDirect ? directPattern : statePatterns[currentState];
-  strip.setBrightness(p.brightness);
+  int key = useDirect ? 100 + directSerial : currentState;   // restart animations on every change
+  if (key != lastKey) { lastKey = key; patternStart = now; }
+  strip.setBrightness((uint16_t) p.brightness * LED_BRIGHTNESS / 255);
   float phase = p.periodMs ? (float)(now % p.periodMs) / p.periodMs : 0;
   switch (p.fx) {
     case FX_OFF: strip.clear(); break;
@@ -424,6 +474,7 @@ void renderLeds() {
       for (int i = 0; i < NEOPIXEL_COUNT; i++)
         strip.setPixelColor(i, strip.ColorHSV((uint16_t)((phase + (float) i / NEOPIXEL_COUNT) * 65535)));
       break;
+    case FX_SWEEP: renderSweep(p, now - patternStart); break;
   }
   strip.show();
 }
@@ -471,6 +522,12 @@ void handleKnob() {
   int r[9];
   for (int i = 0; i < 9; i++) r[i] = analogRead(POT_PIN);
   for (int i = 1; i < 9; i++) { int v = r[i], j = i - 1; while (j >= 0 && r[j] > v) { r[j + 1] = r[j]; j--; } r[j + 1] = v; }
+  // A floating pin (no knob, loose wire) reads all over the place: never treat that as turning.
+  static unsigned long lastNoiseLog = 0;
+  if (r[8] - r[0] > POT_NOISE_SPREAD) {
+    if (millis() - lastNoiseLog > 30000) { lastNoiseLog = millis(); Serial.println("[Volume] knob readings are noise (not connected?) - ignored"); }
+    return;
+  }
   smoothedPot = smoothedPot < 0 ? r[4] : smoothedPot + 0.08f * (r[4] - smoothedPot);
 
   // Notches with hysteresis, so it never flickers between two steps.
@@ -479,7 +536,12 @@ void handleKnob() {
   int step = lastVolumeStep;
   if (pos > lastVolumeStep + 0.8f) step = constrain((int) floor(pos + 0.2f), 0, VOLUME_STEPS - 1);
   else if (pos < lastVolumeStep - 0.8f) step = constrain((int) ceil(pos - 0.2f), 0, VOLUME_STEPS - 1);
-  if (step == lastVolumeStep) return;
+  // Only a step that is read several times in a row counts (a real turn, not a spike).
+  static int pendingStep = -1, pendingCount = 0;
+  if (step == lastVolumeStep) { pendingStep = -1; pendingCount = 0; return; }
+  if (step != pendingStep) { pendingStep = step; pendingCount = 1; return; }
+  if (++pendingCount < POT_CONFIRM_READS) return;
+  pendingStep = -1; pendingCount = 0;
   int delta = step - lastVolumeStep;
   lastVolumeStep = step;
   int pct = step * 100 / (VOLUME_STEPS - 1);
@@ -624,11 +686,11 @@ void setup() {
   cloudQueue = xQueueCreate(8, sizeof(CloudEvent));
 
   strip.begin();
-  strip.setBrightness(80);
-  if (esp_reset_reason() != ESP_RST_SW) {   // boot check: green, blue, yellow
-    strip.fill(strip.Color(0, 255, 40)); strip.show(); delay(250);
-    strip.fill(strip.Color(0, 60, 255)); strip.show(); delay(250);
-    strip.fill(strip.Color(255, 170, 0)); strip.show(); delay(250);
+  strip.setBrightness(LED_BRIGHTNESS);
+  if (esp_reset_reason() != ESP_RST_SW) {   // boot check: awake, thinking, speaking colours
+    strip.fill(strip.Color(0xF1, 0x58, 0x22)); strip.show(); delay(250);
+    strip.fill(strip.Color(0x8E, 0xCB, 0x8C)); strip.show(); delay(250);
+    strip.fill(strip.Color(0x57, 0xBE, 0xEC)); strip.show(); delay(250);
   }
   strip.clear(); strip.show();
 
