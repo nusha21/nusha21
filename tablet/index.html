@@ -459,6 +459,18 @@ function now() {
 }
 function greetWord() { const h = new Date().getHours(); return h < 12 ? "सुप्रभात" : h < 17 ? "नमस्ते" : h < 21 ? "शुभ संध्या" : "शुभ रात्रि"; }
 const greeting = () => `${greetWord()}, ${state.userName || CONFIG.userName}!`;
+/* Diagnostics: last few server calls, warnings and errors, shown with ?debug=1
+   (always on inside the iPad app for now, while it's being tested). */
+const Diag = {
+  lines: [],
+  add(msg) {
+    const d = new Date(), t = `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+    this.lines.push(`${t} ${String(msg).slice(0, 140)}`); if (this.lines.length > 9) this.lines.shift();
+  },
+};
+addEventListener("error", (e) => Diag.add("ERROR " + (e.message || e.type)));
+addEventListener("unhandledrejection", (e) => Diag.add("ERROR " + ((e.reason && (e.reason.message || e.reason)) || "promise")));
+{ const w = console.warn.bind(console); console.warn = (...a) => { Diag.add("warn " + a.map((x) => (x && x.message) || (typeof x === "object" ? JSON.stringify(x) : x)).join(" ")); w(...a); }; }
 const store = {
   get(k, def) { try { const v = localStorage.getItem("saathi:" + k); return v ? JSON.parse(v) : def; } catch (e) { return def; } },
   set(k, v) { try { localStorage.setItem("saathi:" + k, JSON.stringify(v)); } catch (e) {} },
@@ -537,7 +549,9 @@ const API = {
     const limit = opts.timeoutMs || (fields.mode === "wake_check" ? 12000 : opts.stream ? 20000 : 25000);
     let timer = setTimeout(() => ctl.abort(), limit);
     const kick = () => { clearTimeout(timer); timer = setTimeout(() => ctl.abort(), 15000); };   // streaming: 15 s without data = dead
-    try { return await this._voice(fields, opts, ctl.signal, kick); }
+    const t0 = performance.now(), tag = fields.mode || (opts.audio ? "question(audio)" : "question");
+    try { const r = await this._voice(fields, opts, ctl.signal, kick); Diag.add(`${tag} ${Math.round(performance.now() - t0)}ms ok${r && r.wake !== undefined ? " wake=" + r.wake : ""}${r && r.transcript ? " “" + r.transcript + "”" : ""}`); return r; }
+    catch (e) { Diag.add(`${tag} ${Math.round(performance.now() - t0)}ms FAILED ${e.name === "AbortError" ? "timeout" : e.message}`); throw e; }
     finally { clearTimeout(timer); this.live.delete(ctl); }
   },
   async _voice(fields, { audio = null, image = null, stream = false, onLine = null } = {}, signal, kick) {
@@ -1112,6 +1126,7 @@ const Mic = {
           const needSilence = voiced < 1200 ? silenceMs + 400 : silenceMs; // short start -> allow a thinking pause
           if ((spoke && t - lastVoice > needSilence) || t - t0 > maxMs || (!spoke && t - t0 > noSpeechMs)) { rec.stop(); return; }
         }
+        Mic.level = rms;
         const lvl = Math.min(1, rms * 9); const b = buddy(); if (b) b.style.setProperty("--lvl", lvl.toFixed(3)); onLevel && onLevel(lvl);
         lastT = t;
         // rAF stops in background tabs; a timer keeps the recorder honest there
@@ -2366,11 +2381,16 @@ const Health = {
     document.addEventListener("visibilitychange", () => { if (!document.hidden) this.revive(); });
     addEventListener("pageshow", () => this.revive());
     addEventListener("focus", () => this.revive());
-    if (QS.has("debug")) {
+    if (QS.has("debug") || Native.available) {
       const d = document.createElement("div"); d.id = "dbg";
-      d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;font:12px monospace;background:#000b;color:#0f0;padding:4px 8px;border-radius:6px;pointer-events:none";
+      d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;font:11px/1.35 monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:6px;max-width:70vw;white-space:pre-wrap";
+      d.title = "tap to hide";
+      d.addEventListener("click", (e) => { e.stopPropagation(); d.style.display = "none"; });
       document.body.appendChild(d);
-      setInterval(() => { d.textContent = `v27${Native.available ? " app" : ""} busy:${Assistant.busy} state:${Buddy.state} wake:${JSON.stringify(Wake.debug)} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} hw:${Hardware.connected ? "on" : "off"}`; }, 500);
+      setInterval(() => {
+        d.textContent = `v27.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+          `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
+      }, 500);
     }
   },
   async keepAwake() {
