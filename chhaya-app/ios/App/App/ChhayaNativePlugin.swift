@@ -595,7 +595,9 @@ final class NativeMic: NSObject {
 /// and restarted, so the transcript stays small and a stalled session heals by itself.
 final class NativeWake: NSObject {
     private let onText: (String, Bool) -> Void
-    private let engine = AVAudioEngine()
+    // A fresh engine for every session, created AFTER the audio session is set to record:
+    // an engine made while the session was playback-only reports "no microphone" forever.
+    private var engine: AVAudioEngine?
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -651,16 +653,20 @@ final class NativeWake: NSObject {
         if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         request = req
 
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0 else { return "microphone not available" }
-        input.removeTap(onBus: 0)
+        let eng = AVAudioEngine()
+        let input = eng.inputNode
+        var format = input.outputFormat(forBus: 0)
+        if format.sampleRate == 0 { format = input.inputFormat(forBus: 0) }
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            return "microphone not available (input \(audio.isInputAvailable ? "present" : "missing"), category \(audio.category.rawValue))"
+        }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
-        engine.prepare()
-        do { try engine.start() } catch {
+        eng.prepare()
+        do { try eng.start() } catch {
             input.removeTap(onBus: 0)
             return "microphone: \(error.localizedDescription)"
         }
+        engine = eng
 
         session += 1
         let mySession = session
@@ -694,8 +700,11 @@ final class NativeWake: NSObject {
     private func end() {
         session += 1
         restartTimer?.invalidate(); restartTimer = nil
-        if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        if let eng = engine {
+            if eng.isRunning { eng.stop() }
+            eng.inputNode.removeTap(onBus: 0)
+            engine = nil
+        }
         request?.endAudio(); request = nil
         task?.cancel(); task = nil
     }
