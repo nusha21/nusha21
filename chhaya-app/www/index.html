@@ -1455,6 +1455,25 @@ const Assistant = {
       Diag.add("photo asked, no action from server → taking it here"); final.action = "take_photo";
     }
     if (final?.action) { Diag.add("action: " + final.action + (final.videoId ? " " + final.videoId : "")); await this.act(final); }
+    // Guarantee: whatever the server answered, if a song was asked for and nothing is playing
+    // 5 s later, search it here and play it.
+    this.lastHeard = heard || final?.transcript || "";
+    const askedSong = songRequest(this.lastHeard);
+    if (askedSong !== null) {
+      const since = Date.now(), first = this.lastHeard;
+      let waits = 0;
+      const check = () => {
+        if (Music.playing || (Music.lastStart && Music.lastStart > since)) return;
+        // She may still be talking or asking "कौन सा गाना?": wait until she's done (up to ~25 s).
+        if (this.busy && ++waits < 10) return setTimeout(check, 2000);
+        // If she asked which song and got an answer, play the answer; otherwise what was asked.
+        const later = this.lastHeard && this.lastHeard !== first ? this.lastHeard : "";
+        const q = later ? (songRequest(later) ?? later) : askedSong;
+        Diag.add(`song asked but nothing playing → searching “${q || "(any)"}” here`);
+        Music.playByTitle(q || "पुराने हिंदी गाने"); go("#music");
+      };
+      setTimeout(check, 5000);
+    }
     return final;
   },
   async act(r) {
@@ -1979,7 +1998,7 @@ const Music = {
     if (code === 101 || code === 150 || code === 100) { toast("यह गाना यहाँ नहीं चल सकता — अगला चला रही हूँ"); return this.next(); }
     toast("गाना नहीं चल पाया");
   },
-  onState(s) { this.playing = s === 1; if (s === 0) this.next(); this.syncUI(); },
+  onState(s) { this.playing = s === 1; if (s === 1) this.lastStart = Date.now(); if (s === 0) this.next(); this.syncUI(); },
   toggle() { if (!this.player || !this.current) return; this.playing ? this.player.pauseVideo() : this.player.playVideo(); },
   stop() { if (this.player) this.player.stopVideo(); this.current = null; this.playing = false; $("#ytDock").classList.remove("show"); this.syncUI(); },
   list() { return playlists().flatMap((p) => p.songs); },
@@ -2594,7 +2613,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.7${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.8${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
