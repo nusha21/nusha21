@@ -1327,6 +1327,21 @@ const Wake = (() => {
 /* =====================================================================
    ASSISTANT — one conversation turn at a time.
    ===================================================================== */
+/** "छाया, लग जा गले चलाओ" -> "लग जा गले"; "", if a song was asked without a name; null if not a song request. */
+function songRequest(text) {
+  const t = " " + String(text).toLowerCase().replace(/[,.!?।"“”']/g, " ") + " ";
+  if (!/(चला|बजा|सुना|लगा|लाव|वाजव|play|प्ले)/.test(t)) return null;
+  if (!/(गाना|गाने|गीत|भजन|सॉन्ग|song|music|म्यूज़िक|चलाओ|चला दो|चलाइए|बजाओ|बजा दो|सुनाओ|play)/.test(t)) return null;
+  if (/(वीडियो कॉल|कॉल|फोन|फ़ोन|फोटो|फ़ोटो|तस्वीर|call|photo)/.test(t)) return null;
+  const drop = ["छाया जी", "छाया", "chhaya", "chaya", "मुझे", "मेरे लिए", "ज़रा", "जरा", "प्लीज़", "प्लीज", "please", "कोई", "एक", "का", "की", "वाला", "वाली",
+    "गाना", "गाने", "गीत", "सॉन्ग", "song", "songs", "music", "म्यूज़िक", "चला दो", "चला दीजिए", "चलाइए", "चलाओ", "चला", "बजा दो", "बजाओ", "बजा",
+    "सुना दो", "सुनाओ", "सुना", "लगा दो", "लगाओ", "लगा", "लाव", "वाजव", "play करो", "प्ले करो", "play", "प्ले", "करो", "कीजिए", "दो", "ना"];
+  let rest = t;
+  for (const w of drop) rest = rest.split(" " + w + " ").join(" ");
+  rest = rest.replace(/\s+/g, " ").trim();
+  return rest;
+}
+
 const Assistant = {
   busy: false,
   cancelled: false,
@@ -1431,6 +1446,12 @@ const Assistant = {
     if (final && !final.action && /(फ़ोटो|फोटो|तस्वीर|सेल्फी|photo|selfie|picture)/i.test(final.transcript || text || "") &&
         /(खींच|खिंच|ले लो|लो|लीजिए|निकाल|click|take|काढ)/i.test(final.transcript || text || "")) {
       Diag.add("photo asked, no action from server → taking it here"); final.action = "take_photo";
+    }
+    // Safety net: a song was asked for but the voice server found nothing (its own YouTube search
+    // fails) - search it here with the playable-only search.
+    if (final && !final.videoId && (!final.action || final.action === "play_music")) {
+      const song = songRequest(final.transcript || text || "");
+      if (song !== null) { Diag.add(`song asked: “${song || "(any)"}” → searching here`); Music.playByTitle(song || "पुराने हिंदी गाने"); go("#music"); return final; }
     }
     if (final?.action) { Diag.add("action: " + final.action + (final.videoId ? " " + final.videoId : "")); await this.act(final); }
     return final;
@@ -2572,7 +2593,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.5${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.6${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
