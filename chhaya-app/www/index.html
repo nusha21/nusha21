@@ -1220,9 +1220,48 @@ const Wake = (() => {
     try { rec && rec.abort(); } catch (e) {}
     Assistant.onWake(rest.length >= 3 ? rest : "");
   }
+  /* ---- iPad app: Apple's on-device recogniser, like "Hey Siri" ---- */
+  let nativeOn = false, nativeFailed = false, nativeText = "", nativeHooked = false;
+  const useNative = () => Native.available && !nativeFailed && CONFIG.wakeMode !== "server";
+  function nativeRun() {
+    if (!useNative() || nativeOn || !want || paused > 0 || Assistant.busy || Calls.inCall() || Calls.incomingCall || !state.started) return;
+    if (!nativeHooked) {
+      nativeHooked = true;
+      Native.on("wakeText", (d) => {
+        if (!nativeOn || paused > 0 || Assistant.busy || !d || !d.text) return;
+        nativeText = d.text;
+        if (d.isFinal) Diag.add("heard: " + d.text);
+        const hit = find(d.text); if (!hit) return;
+        if (d.isFinal) nativeFire(hit.rest);
+        else if (!pending) pending = setTimeout(() => { const h = find(nativeText); nativeFire(h ? h.rest : ""); }, 700); // wait briefly for "छाया, <request>"
+      });
+    }
+    nativeOn = true; nativeText = ""; updateHint();
+    Native.call("wakeStart", { locale: "hi-IN", hints: CONFIG.wakeWords }).then((r) => {
+      if (r && r.error) {
+        Diag.add("wake (on-device) unavailable: " + r.error + " → server check");
+        nativeOn = false; nativeFailed = true; serverLoop();
+      } else Diag.add("wake: listening on the iPad" + (r && r.onDevice ? " (on-device)" : " (Apple server)"));
+    }).catch((e) => { nativeOn = false; nativeFailed = true; Diag.add("wake start failed: " + e.message); serverLoop(); });
+  }
+  function nativeStop() {
+    clearTimeout(pending); pending = null;
+    if (!nativeOn) return Promise.resolve();
+    nativeOn = false;
+    return Native.call("wakeStop").catch(() => {});
+  }
+  function nativeFire(rest) {
+    clearTimeout(pending); pending = null;
+    if (Assistant.busy) return;
+    Diag.add("wake word ✓" + (rest ? " + “" + rest + "”" : ""));
+    nativeStop();
+    Assistant.onWake(rest.length >= 3 ? rest : "");
+  }
+  const listen = () => (useNative() ? nativeRun() : useServer() ? serverLoop() : run());
+
   /* ---- server check (iPad) ---- */
   let forceServer = false;
-  const useServer = () => serverMode || forceServer;
+  const useServer = () => !useNative() && (serverMode || forceServer);
   async function serverLoop() {
     if (looping || !useServer()) return; looping = true; updateHint();
     try {
@@ -1245,24 +1284,26 @@ const Wake = (() => {
   const api = {
     supported: !!SR || true,
     get active() { return want && !denied; },
-    get server() { return useServer(); },
-    start() { want = true; if (useServer()) serverLoop(); else run(); },
+    get server() { return useServer() || useNative(); },   // (no browser recogniser captions)
+    start() { want = true; listen(); },
     pause() {
       paused++; clearTimeout(pending); pending = null;
       try { rec && rec.abort(); } catch (e) {}
+      nativeStop();
       if (useServer() && looping) Mic.cancel();   // stop the background clip so the real question can record
     },
-    resume() { paused = Math.max(0, paused - 1); if (paused === 0) setTimeout(() => { if (useServer()) serverLoop(); else run(); }, 400); },
+    resume() { paused = Math.max(0, paused - 1); if (paused === 0) setTimeout(listen, 400); },
     /** Clears any leftover pause and restarts listening for "छाया". */
-    reset() { paused = 0; clearTimeout(pending); pending = null; try { rec && rec.abort(); } catch (e) {} running = false; rec = null; setTimeout(() => { if (useServer()) serverLoop(); else run(); }, 300); },
-    get debug() { return { want, running, paused, looping, server: useServer(), lastLoop: lastLoop ? Math.round((Date.now() - lastLoop) / 1000) + "s" : "-" }; },
+    reset() { paused = 0; clearTimeout(pending); pending = null; try { rec && rec.abort(); } catch (e) {} running = false; rec = null; nativeStop().then(() => setTimeout(listen, 300)); },
+    get debug() { return { want, running, paused, looping, native: useNative() ? (nativeOn ? "on" : "off") : "no", server: useServer(), lastLoop: lastLoop ? Math.round((Date.now() - lastLoop) / 1000) + "s" : "-" }; },
     /** Called every few seconds: if nothing is going on, make sure she is really listening. */
     heal() {
       if (!want || !state.started || document.hidden) return;
       const quiet = !Assistant.busy && !Calls.inCall() && !Calls.incomingCall;
       if (quiet && paused > 0) { console.warn("wake: stale pause cleared"); paused = 0; }
       if (!quiet || paused > 0) return;
-      if (useServer()) { if (!looping) serverLoop(); else if (lastLoop && Date.now() - lastLoop > 40000) { Mic.cancel(); } }
+      if (useNative()) { if (!nativeOn) nativeRun(); }
+      else if (useServer()) { if (!looping) serverLoop(); else if (lastLoop && Date.now() - lastLoop > 40000) { Mic.cancel(); } }
       else if (!running) run();
     },
     hint() {
@@ -2438,7 +2479,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v28${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v29${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }

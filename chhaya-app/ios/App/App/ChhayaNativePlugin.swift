@@ -1,6 +1,7 @@
 import Foundation
 import CoreBluetooth
 import AVFoundation
+import Speech
 import UserNotifications
 import Capacitor
 
@@ -15,6 +16,9 @@ import Capacitor
 ///
 /// Reminders: local notifications, so a reminder still rings when the app is
 /// closed or the iPad is offline.
+///
+/// Wake word: Apple's on-device Hindi speech recognition listens continuously and sends
+/// what it hears as text (wakeStart / wakeStop, events "wakeText"); the page spots "छाया".
 ///
 /// Microphone: native recording with voice-activity detection (micRecord / micCancel,
 /// level events "micLevel"). Inside the app the web page's own microphone delivered
@@ -34,7 +38,36 @@ public class ChhayaNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "notifyCancelAll", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "micRecord", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "micCancel", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "wakeStart", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "wakeStop", returnType: CAPPluginReturnPromise),
     ]
+
+    private lazy var wake = NativeWake(onText: { [weak self] text, isFinal in
+        self?.notifyListeners("wakeText", data: ["text": text, "isFinal": isFinal])
+    })
+
+    // MARK: - Wake word
+
+    /// Starts continuous listening. Resolves {} when running, or { error } (no permission,
+    /// Hindi recogniser unavailable...) so the page can fall back to the server check.
+    @objc func wakeStart(_ call: CAPPluginCall) {
+        let locale = call.getString("locale") ?? "hi-IN"
+        let hints = call.getArray("hints", String.self) ?? []
+        DispatchQueue.main.async {
+            self.mic.cancel()
+            self.wake.start(locale: locale, hints: hints) { error in
+                if let error = error { call.resolve(["error": error]) }
+                else { call.resolve(["onDevice": self.wake.onDevice]) }
+            }
+        }
+    }
+
+    @objc func wakeStop(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.wake.stop()
+            call.resolve()
+        }
+    }
 
     private lazy var mic = NativeMic(onLevel: { [weak self] level in
         self?.notifyListeners("micLevel", data: ["level": level])
@@ -52,6 +85,7 @@ public class ChhayaNativePlugin: CAPPlugin, CAPBridgedPlugin {
             noSpeechMs: call.getDouble("noSpeechMs") ?? 8000,
             minSpeechMs: call.getDouble("minSpeechMs") ?? 300)
         DispatchQueue.main.async {
+            self.wake.stop()   // the question recording needs the microphone to itself
             self.mic.record(opts) { result in call.resolve(result) }
         }
     }
@@ -504,5 +538,116 @@ final class NativeMic: NSObject {
         let d = done
         done = nil
         d?(result)
+    }
+}
+
+/// Continuous speech recognition for the wake word, like "Hey Siri": audio never leaves the
+/// iPad when on-device Hindi recognition is available. Each recognition session is kept short
+/// and restarted, so the transcript stays small and a stalled session heals by itself.
+final class NativeWake: NSObject {
+    private let onText: (String, Bool) -> Void
+    private let engine = AVAudioEngine()
+    private var recognizer: SFSpeechRecognizer?
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var restartTimer: Timer?
+    private var wanted = false
+    private var session = 0
+    private var hints: [String] = []
+    private(set) var onDevice = false
+
+    init(onText: @escaping (String, Bool) -> Void) { self.onText = onText }
+
+    func start(locale: String, hints: [String], completion: @escaping (String?) -> Void) {
+        self.hints = hints
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .notDetermined:
+            SFSpeechRecognizer.requestAuthorization { _ in
+                DispatchQueue.main.async { self.start(locale: locale, hints: hints, completion: completion) }
+            }
+            return
+        case .denied, .restricted:
+            return completion("speech recognition not allowed (Settings → Chhaya → Speech Recognition)")
+        default: break
+        }
+        guard let rec = SFSpeechRecognizer(locale: Locale(identifier: locale)), rec.isAvailable else {
+            return completion("\(locale) speech recognition not available on this iPad")
+        }
+        recognizer = rec
+        onDevice = rec.supportsOnDeviceRecognition
+        wanted = true
+        if let error = begin() { wanted = false; return completion(error) }
+        completion(nil)
+    }
+
+    func stop() {
+        wanted = false
+        end()
+    }
+
+    /// Starts one recognition session; returns an error text if the microphone can't start.
+    private func begin() -> String? {
+        end()
+        guard wanted, let rec = recognizer else { return "not started" }
+        let audio = AVAudioSession.sharedInstance()
+        do {
+            try audio.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers])
+            try audio.setActive(true)
+        } catch { return "audio session: \(error.localizedDescription)" }
+
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        req.taskHint = .search
+        req.contextualStrings = hints            // makes "छाया" much more likely to be recognised
+        if rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        request = req
+
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0 else { return "microphone not available" }
+        input.removeTap(onBus: 0)
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in req.append(buffer) }
+        engine.prepare()
+        do { try engine.start() } catch {
+            input.removeTap(onBus: 0)
+            return "microphone: \(error.localizedDescription)"
+        }
+
+        session += 1
+        let mySession = session
+        task = rec.recognitionTask(with: req) { [weak self] result, error in
+            DispatchQueue.main.async {
+                guard let self = self, mySession == self.session else { return }
+                if let r = result {
+                    self.onText(r.bestTranscription.formattedString, r.isFinal)
+                    if r.isFinal { self.restartSoon(0.1) }
+                }
+                if error != nil { self.restartSoon(0.5) }
+            }
+        }
+        // Keep each session short (server recognition stops after about a minute anyway).
+        restartTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: false) { [weak self] _ in self?.restartSoon(0) }
+        return nil
+    }
+
+    private func restartSoon(_ delay: TimeInterval) {
+        guard wanted else { return }
+        let mySession = session
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self, self.wanted, mySession == self.session else { return }
+            if let error = self.begin() {
+                print("[Chhaya] wake restart failed: \(error)")
+                self.restartSoon(2)
+            }
+        }
+    }
+
+    private func end() {
+        session += 1
+        restartTimer?.invalidate(); restartTimer = nil
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        request?.endAudio(); request = nil
+        task?.cancel(); task = nil
     }
 }

@@ -35,6 +35,8 @@
 	<string>परिवार से वीडियो कॉल और फ़ोटो के लिए कैमरा चाहिए। / Chhaya uses the camera for video calls and photos with your family.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>छाया आपकी बात सुनने के लिए माइक्रोफ़ोन का इस्तेमाल करती है। / Chhaya uses the microphone to hear you when you talk to her.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>छाया आपकी आवाज़ में “छाया” सुनने के लिए iPad की आवाज़ पहचान का इस्तेमाल करती है। / Chhaya uses speech recognition to hear her name, like “Hey Siri”.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
