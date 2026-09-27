@@ -237,15 +237,19 @@ void setupBluetooth() {
   bleServer->setCallbacks(new ServerCallbacks());
   bleServer->advertiseOnDisconnect(true);
 
-  // Volume remote
-  NimBLEHIDDevice* hid = new NimBLEHIDDevice(bleServer);
-  hid->setManufacturer("Chhaya");
-  hid->setPnp(0x02, 0x303A, 0x8001, 0x0100);   // USB vendor id source, Espressif VID
-  hid->setHidInfo(0x00, 0x01);
-  hid->setReportMap((uint8_t*) HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
-  hidInput = hid->getInputReport(1);
-  hidInput->setCallbacks(new HidCallbacks());
-  hid->setBatteryLevel(100);
+  // Volume remote (only with a knob: a Bluetooth input device can make the iPad hide its
+  // on-screen keyboard, which blocked typing the WiFi password in Box settings)
+  NimBLEHIDDevice* hid = nullptr;
+  if (USE_POT) {
+    hid = new NimBLEHIDDevice(bleServer);
+    hid->setManufacturer("Chhaya");
+    hid->setPnp(0x02, 0x303A, 0x8001, 0x0100);   // USB vendor id source, Espressif VID
+    hid->setHidInfo(0x00, 0x01);
+    hid->setReportMap((uint8_t*) HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
+    hidInput = hid->getInputReport(1);
+    hidInput->setCallbacks(new HidCallbacks());
+    hid->setBatteryLevel(100);
+  }
 
   // Chhaya Box service
   NimBLEService* svc = bleServer->createService(BOX_SERVICE_UUID);
@@ -259,8 +263,10 @@ void setupBluetooth() {
   // Advertising: flags + appearance + both services (29 of 31 bytes); the name goes in the scan response.
   NimBLEAdvertisementData adv;
   adv.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
-  adv.setAppearance(0x03C0);  // generic HID device
-  adv.addServiceUUID(hid->getHidService()->getUUID());
+  if (hid) {
+    adv.setAppearance(0x03C0);  // generic HID device
+    adv.addServiceUUID(hid->getHidService()->getUUID());
+  }
   adv.addServiceUUID(NimBLEUUID(BOX_SERVICE_UUID));
   NimBLEAdvertisementData scan;
   scan.setName(BOX_NAME);
@@ -289,6 +295,7 @@ void flushToApp() {
 }
 
 void tapVolume(uint8_t bit) {
+  if (!hidInput) return;
   uint8_t v = bit;
   hidInput->setValue(&v, 1); hidInput->notify();
   delay(12);

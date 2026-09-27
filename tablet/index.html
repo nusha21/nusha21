@@ -382,7 +382,7 @@ const CONFIG = {
   checkin: { enabled: true, fromHour: 9, toHour: 20, quietMin: 45, everyMin: 150 },
 
   /* Wake words (the recogniser listens in hi-IN). */
-  wakeWords: ["छाया", "छाया जी", "छाय्या", "छया", "चाया", "छैया", "chhaya", "chaya", "chhaaya", "chaaya", "shaya"],
+  wakeWords: ["छाया", "छाया जी", "छाय्या", "छया", "चाया", "छैया", "छइया", "छाय", "chhaya", "chaya", "chhaaya", "chaaya", "shaya"],   // "छाय" = the word half-heard, so she reacts sooner
 
   /* Medicine check-in timing (minutes). Add ?fast=1 to the URL to demo in seconds. */
   medicine: { askAfterMin: 10, guardianAfterMin: 3, giveUpAfterMin: 10 },
@@ -2337,8 +2337,7 @@ const Hardware = (() => {
    ===================================================================== */
 const BoxSettings = {
   isOpen() { return !!document.querySelector('[data-overlay="box"]'); },
-  refresh() { if (this.isOpen()) this.render(); },
-  open() { this.render(true); },
+  open() { this.render(); },
   wifiText(w) {
     if (!w) return ["—", ""];
     const [st, a, ...rest] = w.split(" ");
@@ -2353,24 +2352,33 @@ const BoxSettings = {
     }
     return [w, ""];
   },
-  render(first) {
+  status() {
     const hw = Hardware, box = hw.box;
-    const btText = hw.connected ? `✓ जुड़ा है${hw.kind === "native" ? "" : " (" + hw.kind + ")"}${box.fw ? " · v" + box.fw : ""}`
+    const bt = hw.connected ? `✓ जुड़ा है${hw.kind === "native" ? "" : " (" + hw.kind + ")"}${box.fw ? " · v" + box.fw : ""}`
       : ({ searching: "ढूँढ रही हूँ… (बॉक्स चालू है?)", unauthorized: "✗ अनुमति नहीं: Settings → Chhaya → Bluetooth", "bluetooth-off": "✗ iPad का Bluetooth बंद है" }[box.native] || "जुड़ा नहीं है");
     const [wText, wCls] = this.wifiText(box.wifi);
     const cur = (box.wifi.match(/^(?:OK \S+|CONNECTING|FAIL \S+) (.+)$/) || [])[1] || "";
-    const old = document.querySelector('[data-overlay="box"]');
-    // Keep what's being typed when the status updates.
-    const ssid = old ? old.querySelector("#boxSsid").value : cur;
-    const pass = old ? old.querySelector("#boxPass").value : "";
-    const html = `<div class="overlay" data-overlay="box"><div class="med-card boxset">
+    return { bt, btCls: hw.connected ? "ok" : "bad", wText, wCls, cur };
+  },
+  /** Status changes only update the two status lines: redrawing the inputs would close the iPad keyboard. */
+  refresh() {
+    const o = document.querySelector('[data-overlay="box"]'); if (!o) return;
+    const st = this.status();
+    const b = o.querySelector("#boxBt"), w = o.querySelector("#boxWifi"), ssid = o.querySelector("#boxSsid");
+    b.textContent = st.bt; b.className = st.btCls;
+    w.textContent = st.wText; w.className = st.wCls;
+    if (ssid && !ssid.value && document.activeElement !== ssid && st.cur) ssid.value = st.cur;
+  },
+  render() {
+    const hw = Hardware, st = this.status();
+    $("#overlay").innerHTML = `<div class="overlay" data-overlay="box"><div class="med-card boxset">
       <h2>बटन बॉक्स · Box settings</h2>
-      <div class="st"><span>Bluetooth</span><b class="${hw.connected ? "ok" : "bad"}">${esc(btText)}</b></div>
-      <div class="st"><span>WiFi (बैकअप)</span><b class="${wCls}">${esc(wText)}</b></div>
+      <div class="st"><span>Bluetooth</span><b id="boxBt" class="${st.btCls}">${esc(st.bt)}</b></div>
+      <div class="st"><span>WiFi (बैकअप)</span><b id="boxWifi" class="${st.wCls}">${esc(st.wText)}</b></div>
       <label for="boxSsid">WiFi का नाम</label>
-      <input id="boxSsid" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(ssid)}">
+      <input id="boxSsid" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(st.cur)}">
       <label for="boxPass">WiFi पासवर्ड</label>
-      <div class="pw"><input id="boxPass" type="password" autocomplete="off" value="${esc(pass)}"><button class="tap" data-act="boxPwToggle">👁</button></div>
+      <div class="pw"><input id="boxPass" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" value=""><button class="tap" data-act="boxPwToggle">👁</button></div>
       <div class="note">बॉक्स इसे सेव कर लेता है; जब चाहें बदल सकते हैं। सिर्फ़ 2.4 GHz WiFi चलता है।</div>
       <div class="row">
         <button class="yes tap" data-act="boxSave">WiFi सेव करें</button>
@@ -2380,12 +2388,7 @@ const BoxSettings = {
         <button class="no tap" data-act="closeOverlay">बंद करें</button>
       </div>
     </div></div>`;
-    if (old) {
-      const focused = document.activeElement && document.activeElement.id;
-      old.outerHTML = html;
-      if (focused) { const el = document.getElementById(focused); if (el) el.focus(); }
-    } else if (first) $("#overlay").innerHTML = html;
-    if (first && hw.connected) hw.askWifi();
+    if (hw.connected) hw.askWifi();
   },
 };
 
@@ -2479,7 +2482,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v29${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v29.1${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
