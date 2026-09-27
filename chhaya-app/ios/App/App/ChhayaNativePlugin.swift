@@ -1,5 +1,6 @@
 import Foundation
 import CoreBluetooth
+import AVFoundation
 import UserNotifications
 import Capacitor
 
@@ -14,6 +15,10 @@ import Capacitor
 ///
 /// Reminders: local notifications, so a reminder still rings when the app is
 /// closed or the iPad is offline.
+///
+/// Microphone: native recording with voice-activity detection (micRecord / micCancel,
+/// level events "micLevel"). Inside the app the web page's own microphone delivered
+/// no usable speech, so listening goes through Apple's recorder instead.
 @objc(ChhayaNativePlugin)
 public class ChhayaNativePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "ChhayaNativePlugin"
@@ -27,7 +32,36 @@ public class ChhayaNativePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "notifyPermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "notifySchedule", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "notifyCancelAll", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "micRecord", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "micCancel", returnType: CAPPluginReturnPromise),
     ]
+
+    private lazy var mic = NativeMic(onLevel: { [weak self] level in
+        self?.notifyListeners("micLevel", data: ["level": level])
+    })
+
+    // MARK: - Microphone
+
+    /// Records one utterance: starts when speech is heard, stops after a pause.
+    /// Options (ms): maxMs, silenceMs, noSpeechMs, minSpeechMs.
+    /// Resolves { audio: base64 m4a, mime, voicedMs, durationMs } or { empty: true, reason }.
+    @objc func micRecord(_ call: CAPPluginCall) {
+        let opts = NativeMic.Options(
+            maxMs: call.getDouble("maxMs") ?? 15000,
+            silenceMs: call.getDouble("silenceMs") ?? 1000,
+            noSpeechMs: call.getDouble("noSpeechMs") ?? 8000,
+            minSpeechMs: call.getDouble("minSpeechMs") ?? 300)
+        DispatchQueue.main.async {
+            self.mic.record(opts) { result in call.resolve(result) }
+        }
+    }
+
+    @objc func micCancel(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            self.mic.cancel()
+            call.resolve()
+        }
+    }
 
     private lazy var box = BoxLink(
         onState: { [weak self] state, name in
@@ -339,5 +373,136 @@ final class BoxLink: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
         if let error = error { print("[Chhaya] box write failed: \(error)") }
         writing = false
         pump()
+    }
+}
+
+/// One recording at a time, with the same pause detection the page used:
+/// calibrate on the room for 250 ms, count speech above the room level,
+/// stop after `silenceMs` of quiet (a bit longer after a very short start).
+final class NativeMic: NSObject {
+    struct Options { let maxMs: Double; let silenceMs: Double; let noSpeechMs: Double; let minSpeechMs: Double }
+
+    private let onLevel: (Double) -> Void
+    private var recorder: AVAudioRecorder?
+    private var timer: Timer?
+    private var done: (([String: Any]) -> Void)?
+    private var opts = Options(maxMs: 15000, silenceMs: 1000, noSpeechMs: 8000, minSpeechMs: 300)
+    private var fileURL: URL?
+    private var t0 = Date(), lastTick = Date(), lastVoice = Date()
+    private var spoke = false, voicedMs = 0.0, cancelled = false
+    private var calib: [Float] = []
+    private var noiseDb: Float = -50   // running estimate of the room, in dB (0 = loudest)
+    private var tickCount = 0
+
+    init(onLevel: @escaping (Double) -> Void) { self.onLevel = onLevel }
+
+    func record(_ o: Options, completion: @escaping ([String: Any]) -> Void) {
+        if recorder != nil { finish(keep: false) }   // only one recording at a time
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .undetermined:
+            session.requestRecordPermission { granted in
+                DispatchQueue.main.async {
+                    if granted { self.record(o, completion: completion) }
+                    else { completion(["empty": true, "reason": "microphone permission denied"]) }
+                }
+            }
+            return
+        case .denied:
+            return completion(["empty": true, "reason": "microphone permission denied (Settings → Chhaya → Microphone)"])
+        default: break
+        }
+        opts = o
+        done = completion
+        cancelled = false
+        do {
+            try session.setCategory(.playAndRecord, mode: .default,
+                                    options: [.defaultToSpeaker, .allowBluetoothA2DP, .mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            return end(["empty": true, "reason": "session: \(error.localizedDescription)"])
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("chhaya-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 16000,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+        ]
+        do {
+            let r = try AVAudioRecorder(url: url, settings: settings)
+            r.isMeteringEnabled = true
+            guard r.record() else { return end(["empty": true, "reason": "recorder would not start (microphone permission?)"]) }
+            recorder = r
+            fileURL = url
+        } catch {
+            return end(["empty": true, "reason": "recorder: \(error.localizedDescription)"])
+        }
+        t0 = Date(); lastTick = t0; lastVoice = t0
+        spoke = false; voicedMs = 0; calib = []; tickCount = 0
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    func cancel() {
+        cancelled = true
+        if recorder != nil { finish(keep: false) }
+    }
+
+    private func tick() {
+        guard let r = recorder else { return }
+        r.updateMeters()
+        let db = r.averagePower(forChannel: 0)
+        let now = Date()
+        let elapsed = now.timeIntervalSince(t0) * 1000
+        if elapsed < 250 {
+            calib.append(db)
+        } else {
+            if !calib.isEmpty {
+                let sorted = calib.sorted()
+                noiseDb = min(-20, 0.5 * noiseDb + 0.5 * sorted[sorted.count / 2])
+                calib = []
+            }
+            let onDb = max(noiseDb + 12, -42)    // to start counting as speech
+            let keepDb = max(noiseDb + 7, -48)   // softer words while already speaking
+            let isVoice = db > (spoke ? keepDb : onDb)
+            if isVoice {
+                spoke = true
+                lastVoice = now
+                voicedMs += now.timeIntervalSince(lastTick) * 1000
+            } else if !spoke {
+                noiseDb = noiseDb * 0.995 + db * 0.005   // learn the room while waiting
+            }
+            let needSilence = voicedMs < 1200 ? opts.silenceMs + 400 : opts.silenceMs
+            let quietFor = now.timeIntervalSince(lastVoice) * 1000
+            if (spoke && quietFor > needSilence) || elapsed > opts.maxMs || (!spoke && elapsed > opts.noSpeechMs) {
+                return finish(keep: true)
+            }
+        }
+        lastTick = now
+        tickCount += 1
+        if tickCount % 2 == 0 {   // ~10 level updates a second for the face's glow
+            onLevel(Double(max(0, min(1, (db + 55) / 45))))
+        }
+    }
+
+    private func finish(keep: Bool) {
+        timer?.invalidate(); timer = nil
+        let duration = Date().timeIntervalSince(t0) * 1000
+        recorder?.stop(); recorder = nil
+        onLevel(0)
+        defer { if let u = fileURL { try? FileManager.default.removeItem(at: u) }; fileURL = nil }
+        guard keep, !cancelled, spoke, voicedMs >= opts.minSpeechMs,
+              let u = fileURL, let data = try? Data(contentsOf: u), !data.isEmpty else {
+            return end(["empty": true, "reason": cancelled ? "cancelled" : (spoke ? "too short" : "no speech"),
+                        "voicedMs": voicedMs, "durationMs": duration, "noiseDb": Double(noiseDb)])
+        }
+        end(["audio": data.base64EncodedString(), "mime": "audio/mp4", "voicedMs": voicedMs,
+             "durationMs": duration, "noiseDb": Double(noiseDb)])
+    }
+
+    private func end(_ result: [String: Any]) {
+        let d = done
+        done = nil
+        d?(result)
     }
 }

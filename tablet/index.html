@@ -1066,8 +1066,11 @@ const Sounds = (() => {
    ===================================================================== */
 const Mic = {
   stream: null,
-  alive() { const s = this.stream; return !!s && s.active !== false && s.getAudioTracks().some((t) => t.readyState === "live"); },
+  // Inside the iPad app the web microphone delivered no usable speech, so the app records natively.
+  get native() { return Native.available; },
+  alive() { if (this.native) return true; const s = this.stream; return !!s && s.active !== false && s.getAudioTracks().some((t) => t.readyState === "live"); },
   async init() {
+    if (this.native) return null;
     // iPad kills the microphone when the screen sleeps or another app/call takes it: get a fresh one.
     if (this.alive()) return this.stream;
     try { this.stream && this.stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
@@ -1088,7 +1091,31 @@ const Mic = {
     const p = this._record(opts); this._active = p;
     try { return await p; } finally { if (this._active === p) this._active = null; }
   },
-  async _record({ maxMs = 15000, silenceMs = 1000, noSpeechMs = 8000, minSpeechMs = 300, onLevel = null } = {}) {
+  async _recordNative({ maxMs = 15000, silenceMs = 1000, noSpeechMs = 8000, minSpeechMs = 300 } = {}) {
+    Voice.wake();
+    let stop = null;
+    this._cancel = () => Native.call("micCancel").catch(() => {});
+    const r = await Promise.race([
+      Native.call("micRecord", { maxMs, silenceMs, noSpeechMs, minSpeechMs }).catch((e) => ({ empty: true, reason: e.message })),
+      new Promise((res) => { stop = setTimeout(() => { Native.call("micCancel").catch(() => {}); res({ empty: true, reason: "timeout" }); }, Math.max(maxMs, noSpeechMs) + 5000); }),
+    ]);
+    clearTimeout(stop); this._cancel = null;
+    if (!r || !r.audio) {
+      if (r && r.reason && !/no speech|cancelled|too short/.test(r.reason)) Diag.add("mic: " + r.reason);
+      return null;
+    }
+    const bin = atob(r.audio), bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: "audio/mp4" });
+    Mic.lastClip = blob;
+    Diag.add(`clip(native) ${Math.round(blob.size / 1024)}KB voiced ${Math.round(r.voicedMs)}ms of ${Math.round(r.durationMs)}ms room ${Math.round(r.noiseDb)}dB`);
+    return blob;
+  },
+  async _record(opts = {}) {
+    if (this.native) return this._recordNative(opts);
+    return this._recordWeb(opts);
+  },
+  async _recordWeb({ maxMs = 15000, silenceMs = 1000, noSpeechMs = 8000, minSpeechMs = 300, onLevel = null } = {}) {
     const stream = await this.init();
     Voice.wake();
     const ctx = Voice.ctx; const src = ctx.createMediaStreamSource(stream); const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
@@ -2391,7 +2418,7 @@ const Health = {
     addEventListener("focus", () => this.revive());
     if (QS.has("debug") || Native.available) {
       const d = document.createElement("div"); d.id = "dbg";
-      d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:99999;font:11px/1.35 monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:6px;max-width:70vw;white-space:pre-wrap";
+      d.style.cssText = "position:fixed;left:6px;bottom:6px;z-index:55;font:11px/1.35 monospace;background:#000c;color:#0f0;padding:4px 8px;border-radius:6px;max-width:70vw;max-height:34vh;overflow:hidden;white-space:pre-wrap";   // under popups (z 60)
       const bar = document.createElement("div"); bar.style.cssText = "display:flex;gap:8px;margin-bottom:4px";
       bar.innerHTML = '<button data-dbg="play" style="background:#0f0;color:#000;border-radius:6px;padding:4px 10px;font:bold 13px sans-serif">▶ play last clip</button><button data-dbg="hide" style="background:#444;color:#fff;border-radius:6px;padding:4px 10px;font:13px sans-serif">hide</button>';
       const txt = document.createElement("div");
@@ -2408,7 +2435,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v27.3${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v28${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
@@ -2528,7 +2555,10 @@ Start.show();
 Hardware.autoConnect();
 // iPadOS keeps the page's audio engine (which also measures the voice level for "छाया")
 // off until the screen is touched, so Chhaya still starts with one tap on "शुरू करें".
-if (Native.available) Native.start();
+if (Native.available) {
+  Native.start();
+  Native.on("micLevel", (d) => { const l = (d && d.level) || 0; Mic.level = l; const b = document.getElementById("buddy"); if (b) b.style.setProperty("--lvl", l.toFixed(3)); });
+}
 // Any touch re-enables sound + listening if the iPad paused them (sleep, a call, Control Centre).
 document.addEventListener("pointerdown", () => { if (state.started) Voice.wake(); }, true);
 if (QS.has("box")) setTimeout(() => BoxSettings.open(), 1200);
