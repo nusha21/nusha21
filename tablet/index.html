@@ -1415,13 +1415,14 @@ const Assistant = {
   },
   async ask({ text, audio }) {
     Buddy.setState("thinking"); Buddy.bubble(text ? `<span class="you">आप: ${esc(text)}</span>${DOTS}` : `<span class="you">सोच रही हूँ</span>${DOTS}`);
-    let chain = Promise.resolve(); let final = null; const spoken = []; let streamed = false;
+    let chain = Promise.resolve(); let final = null; const spoken = []; let streamed = false; let heard = text || "";
     const fields = { features: "call,photo", history: state.history.slice(-6), tts: "stream" };
     if (text) fields.text = text;
     final = await API.voice(fields, {
       audio, stream: true,
       onLine: (o) => {
         if (o.sessionId) state.sessionId = o.sessionId;
+        if (o.transcript) heard = o.transcript;
         if (this.cancelled) return;
         if (o.type === "pcm") { streamed = true; Voice.pcm(o.data); if (Buddy.state !== "speaking") Buddy.setState("speaking"); return; }
         if (o.type === "text") { Buddy.bubble(`<div class="scroll">${esc(o.text)}</div>`); if (o.language) setLang(o.language); return; }
@@ -1438,7 +1439,13 @@ const Assistant = {
     const said = (final && final.reply) || spoken.join(" ");
     if (/(हि|ही){2,}|हा\s?हा|हे\s?हे|खीखी/.test(said)) { Sounds.giggle(); Buddy.happy(1400); Buddy.hop(); }
     if (final?.noSpeech) return final;
-    if (final?.error) { Sounds.error(); Buddy.bubble(esc(final.error)); await sleep(1800); return final; }
+    // Safety net: a song was asked for but the voice server found nothing (its own YouTube search
+    // fails, sometimes as an error) - search it here with the playable-only search.
+    if (final && !final.videoId && (!final.action || final.action === "play_music")) {
+      const song = songRequest(final.transcript || heard || "");
+      if (song !== null) { Diag.add(`song asked: “${song || "(any)"}” → searching here`); Music.playByTitle(song || "पुराने हिंदी गाने"); go("#music"); return final; }
+    }
+    if (final?.error) { Sounds.error(); Buddy.bubble(esc(final.error)); Diag.add("server said: " + final.error + (heard ? " (heard “" + heard + "”)" : "")); await sleep(1800); return final; }
     if (final?.language) setLang(final.language);
     if (final?.transcript) state.history.push({ user: final.transcript, assistant: final.reply || spoken.join(" ") || "" });
     state.history = state.history.slice(-8);
@@ -1446,12 +1453,6 @@ const Assistant = {
     if (final && !final.action && /(फ़ोटो|फोटो|तस्वीर|सेल्फी|photo|selfie|picture)/i.test(final.transcript || text || "") &&
         /(खींच|खिंच|ले लो|लो|लीजिए|निकाल|click|take|काढ)/i.test(final.transcript || text || "")) {
       Diag.add("photo asked, no action from server → taking it here"); final.action = "take_photo";
-    }
-    // Safety net: a song was asked for but the voice server found nothing (its own YouTube search
-    // fails) - search it here with the playable-only search.
-    if (final && !final.videoId && (!final.action || final.action === "play_music")) {
-      const song = songRequest(final.transcript || text || "");
-      if (song !== null) { Diag.add(`song asked: “${song || "(any)"}” → searching here`); Music.playByTitle(song || "पुराने हिंदी गाने"); go("#music"); return final; }
     }
     if (final?.action) { Diag.add("action: " + final.action + (final.videoId ? " " + final.videoId : "")); await this.act(final); }
     return final;
@@ -2593,7 +2594,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.6${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.7${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
