@@ -693,8 +693,10 @@ void setup() {
   cloudQueue = xQueueCreate(8, sizeof(CloudEvent));
 
   strip.begin();
-  strip.setBrightness(LED_BRIGHTNESS);
-  if (esp_reset_reason() != ESP_RST_SW) {   // boot check: awake, thinking, speaking colours
+  // Boot check, dim and only on a real power-on: 72 LEDs at full brightness draw more than a USB
+  // port gives, the voltage dips, the ESP32 restarts, and the check ran again - a restart loop.
+  strip.setBrightness(30);
+  if (esp_reset_reason() == ESP_RST_POWERON) {   // awake, thinking, speaking colours
     strip.fill(strip.Color(0xF1, 0x58, 0x22)); strip.show(); delay(250);
     strip.fill(strip.Color(0x8E, 0xCB, 0x8C)); strip.show(); delay(250);
     strip.fill(strip.Color(0x57, 0xBE, 0xEC)); strip.show(); delay(250);
@@ -702,11 +704,16 @@ void setup() {
   strip.clear(); strip.show();
 
   Serial.println("\nCHHAYA button box v" FIRMWARE_VERSION " (Bluetooth LE + WiFi backup)");
+  Serial.printf("[Boot] reset reason %d, free memory %u\n", (int) esp_reset_reason(), ESP.getFreeHeap());
+  Serial.println("[Boot] 1/4 loading saved settings..."); Serial.flush();
   loadSettings();
+  Serial.println("[Boot] 2/4 starting Bluetooth..."); Serial.flush();
   setupBluetooth();
+  Serial.println("[Boot] 3/4 starting WiFi..."); Serial.flush();
   WiFi.onEvent(onWiFiEvent);
   delay(300);
   xTaskCreatePinnedToCore(wifiTask, "wifi", 10240, nullptr, 1, nullptr, 0);
+  Serial.println("[Boot] 4/4 ready"); Serial.flush();
 }
 
 void loop() {
