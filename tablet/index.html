@@ -1897,9 +1897,35 @@ const Music = {
     const p = await this.load(); p.loadVideoById(song.videoId); p.setVolume(this.vol());
     this.syncUI();
   },
-  async playByTitle(title, tries = 0, blocked = [], asked = title) {
+  /** Playable-only YouTube search (Supabase function chhaya-yt-search). null if it isn't set up. */
+  async searchPlayable(query) {
     try {
-      if (!tries) toast("गाना ढूँढ रही हूँ…");
+      const res = await fetch(`${CONFIG.supabase.url}/functions/v1/chhaya-yt-search`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${CONFIG.supabase.anonKey}`, apikey: CONFIG.supabase.anonKey },
+        body: JSON.stringify({ query, max: 6 }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !Array.isArray(d.items)) { Diag.add(`yt-search: ${d.error || "HTTP " + res.status} → old search`); return null; }
+      Diag.add(`yt-search “${query}”: ${d.items.length} playable`);
+      return d.items;
+    } catch (e) { Diag.add("yt-search unavailable → old search"); return null; }
+  },
+  /** Plays the first playable version; on an error the next one is tried (see onError). */
+  playFromList(asked, items, blocked = []) {
+    const list = items.filter((i) => !blocked.includes(i.videoId));
+    if (!list.length) { toast("माफ़ कीजिए, यह गाना यहाँ नहीं चल सकता"); this.stop(); return false; }
+    const [first, ...rest] = list;
+    this.play({ videoId: first.videoId, title: first.title, asked, alts: rest, blocked });
+    return true;
+  },
+  async playByTitle(title, tries = 0, blocked = [], asked = title) {
+    if (!tries) {
+      toast("गाना ढूँढ रही हूँ…");
+      const items = await this.searchPlayable(title);
+      if (items && items.length) { this.playFromList(asked, items, blocked); return; }
+      if (items) { toast("गाना नहीं मिला"); return; }
+    }
+    try {
       const r = await API.voice({ mode: "music_search", query: title });
       if (r.videoId && !blocked.includes(r.videoId)) { this.play({ videoId: r.videoId, title: r.title, trackId: r.trackId, asked, tries, blocked }); Data.loadTracks(); }
       else if (r.videoId) this.tryOtherVersion({ asked, tries, blocked });
@@ -1908,7 +1934,15 @@ const Music = {
   },
   /* Many official film songs don't allow playing outside YouTube (errors 101/150): look for
      another upload of the same song ("lyrics", "audio"...), which usually allows it. */
-  tryOtherVersion(song) {
+  async tryOtherVersion(song) {
+    const blockedNow = [...(song.blocked || []), song.videoId].filter(Boolean);
+    // Playable-only search results: just move to the next one.
+    if (song.alts && song.alts.length) { Diag.add("trying the next playable version"); this.playFromList(song.asked, song.alts, blockedNow); return; }
+    if (Array.isArray(song.alts)) { toast("माफ़ कीजिए, यह गाना यहाँ नहीं चल सकता"); this.stop(); return; }   // all playable versions tried
+    if (!song.alts && !song.searched && song.asked) {
+      const items = await this.searchPlayable(song.asked);
+      if (items && items.length) { this.playFromList(song.asked, items.map((i) => i), blockedNow); if (this.current) this.current.searched = true; return; }
+    }
     const variants = ["lyrics", "audio song", "full song"];
     const tries = (song.tries || 0) + 1, asked = song.asked || song.title || "";
     const blocked = [...(song.blocked || []), song.videoId].filter(Boolean);
@@ -2538,7 +2572,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.4${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.5${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
