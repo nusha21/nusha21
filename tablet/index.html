@@ -1427,7 +1427,12 @@ const Assistant = {
     if (final?.language) setLang(final.language);
     if (final?.transcript) state.history.push({ user: final.transcript, assistant: final.reply || spoken.join(" ") || "" });
     state.history = state.history.slice(-8);
-    if (final?.action) await this.act(final);
+    // Safety net: "फ़ोटो खींचो" understood but no action came back from the server.
+    if (final && !final.action && /(फ़ोटो|फोटो|तस्वीर|सेल्फी|photo|selfie|picture)/i.test(final.transcript || text || "") &&
+        /(खींच|खिंच|ले लो|लो|लीजिए|निकाल|click|take|काढ)/i.test(final.transcript || text || "")) {
+      Diag.add("photo asked, no action from server → taking it here"); final.action = "take_photo";
+    }
+    if (final?.action) { Diag.add("action: " + final.action + (final.videoId ? " " + final.videoId : "")); await this.act(final); }
     return final;
   },
   async act(r) {
@@ -1875,7 +1880,8 @@ const Music = {
     this.ready = new Promise((resolve) => {
       window.onYouTubeIframeAPIReady = () => {
         this.player = new YT.Player("ytPlayer", {
-          width: "100%", height: "100%", playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1 },
+          // origin + widget_referrer tell YouTube which site embeds it (missing = "Error 153" in apps)
+          width: "100%", height: "100%", playerVars: { autoplay: 1, playsinline: 1, rel: 0, modestbranding: 1, enablejsapi: 1, origin: location.origin, widget_referrer: location.href },
           events: { onReady: () => resolve(this.player), onStateChange: (e) => this.onState(e.data),
             // 2 bad id, 5 player error, 100 removed, 101/150 embedding not allowed, 153 page origin not accepted
             onError: (e) => { Diag.add("YouTube error " + e.data); if (e.data === 101 || e.data === 150) { toast("यह गाना यहाँ नहीं चल सकता — अगला चला रही हूँ"); this.next(); } else toast("गाना नहीं चल पाया"); } },
@@ -1928,7 +1934,10 @@ const Camera = {
   async start() {
     const wrap = $("#camwrap"); if (!wrap) return;
     try {
-      if (!Camera.stream) Camera.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 } }, audio: false });
+      if (!Camera.stream) {
+        try { Camera.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 1280 } }, audio: false }); }
+        catch (e) { Diag.add("camera: " + e.name + " " + (e.message || "")); throw e; }
+      }
       if (!$("#camwrap")) return Camera.stop();
       wrap.innerHTML = `<video autoplay playsinline muted></video><div class="countdown" id="countdown"></div>`;
       wrap.querySelector("video").srcObject = Camera.stream;
@@ -1937,9 +1946,9 @@ const Camera = {
     }
   },
   stop() { if (Camera.stream) { Camera.stream.getTracks().forEach((t) => t.stop()); Camera.stream = null; } },
-  async waitVideo() { for (let i = 0; i < 40; i++) { const v = document.querySelector("#camwrap video"); if (v && v.videoWidth) return v; await sleep(150); } return null; },
+  async waitVideo() { for (let i = 0; i < 70; i++) { const v = document.querySelector("#camwrap video"); if (v && v.videoWidth) return v; await sleep(150); } return null; },
   async countdownShot(n = 3) {
-    const v = await this.waitVideo(); if (!v) { toast("कैमरा चालू नहीं है"); return; }
+    const v = await this.waitVideo(); if (!v) { Diag.add("camera: no picture after 10 s"); toast("कैमरा चालू नहीं है"); return; }
     for (let i = n; i >= 1; i--) { const cd = $("#countdown"); if (cd) cd.innerHTML = `<span>${toDev(i)}</span>`; Voice.beep(i === 1 ? 988 : 784, 180); await sleep(1000); }
     const cd = $("#countdown"); if (cd) cd.innerHTML = "";
     await this.capture(v);
@@ -1955,8 +1964,8 @@ const Camera = {
     const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.85));
     state.photos.unshift({ image_url: URL.createObjectURL(blob), source: "recipient" });
     if (!SB) { toast("तस्वीर ली गई"); return; }
-    try { toast("तस्वीर भेज रही हूँ…"); await API.voice({ mode: "photo_upload" }, { image: blob }); toast("तस्वीर परिवार को भेज दी गई ✓"); Data.loadPhotos(); }
-    catch (e) { console.error(e); toast("तस्वीर भेजी नहीं जा सकी"); }
+    try { toast("तस्वीर भेज रही हूँ…"); const up = await API.voice({ mode: "photo_upload" }, { image: blob }); if (up && up.error) throw new Error(up.error); toast("तस्वीर परिवार को भेज दी गई ✓"); Data.loadPhotos(); }
+    catch (e) { Diag.add("photo upload failed: " + e.message); toast("तस्वीर भेजी नहीं जा सकी"); }
   },
 };
 
@@ -2510,7 +2519,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.2${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.3${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
