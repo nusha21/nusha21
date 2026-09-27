@@ -1,0 +1,21 @@
+{
+  "appId": "com.nusha.chhaya",
+  "appName": "Chhaya",
+  "webDir": "www",
+  "server": {
+    "allowNavigation": [
+      "ipadtest2.vercel.app"
+    ]
+  },
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false,
+    "backgroundColor": "#FFF6EC"
+  },
+  "plugins": {
+    "SystemBars": {
+      "hidden": true
+    }
+  }
+}

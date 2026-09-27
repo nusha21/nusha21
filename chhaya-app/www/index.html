@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chhaya</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #FFF6EC; font-family: -apple-system, "Noto Sans Devanagari", sans-serif; color: #5A3E2B; }
+  .wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding: 24px; box-sizing: border-box; }
+  img { width: 180px; height: 180px; border-radius: 50%; }
+  p { font-size: 26px; margin: 0; }
+  small { font-size: 16px; opacity: .6; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img src="face.png" alt="">
+  <p id="msg">छाया आ रही है…</p>
+  <small id="sub"></small>
+</div>
+<script>
+/* Start-up page, bundled inside the app.
+   With internet: open the live Chhaya page from Vercel (so updates need no app rebuild).
+   Without internet: open the copy of the page built into the app (offline/index.html).
+   That copy keeps checking and switches to the live page once the internet is back. */
+const REMOTE_URL = "https://ipadtest2.vercel.app/";
+const TIMEOUT_MS = 6000;
+
+async function reachable(url, ms) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), ms);
+  try { await fetch(url + (url.includes("?") ? "&" : "?") + "ping=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctl.signal }); return true; }
+  catch (e) { return false; }
+  finally { clearTimeout(t); }
+}
+
+(async () => {
+  const qs = location.search || "";
+  if (navigator.onLine !== false && await reachable(REMOTE_URL, TIMEOUT_MS)) {
+    location.replace(REMOTE_URL + qs);
+  } else {
+    document.getElementById("msg").textContent = "इंटरनेट नहीं है — छाया थोड़ी देर में पूरी तरह चालू होगी";
+    document.getElementById("sub").textContent = "No internet: opening the offline copy";
+    setTimeout(() => location.replace("offline/index.html" + qs), 1500);
+  }
+})();
+</script>
+</body>
+</html>
