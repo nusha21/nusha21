@@ -368,8 +368,9 @@ const CONFIG = {
   /* Maya voice for Chhaya. "" = the server default (Ananya). Maya Calyx voices you can try:
      "Tarini", "Diya", "Riya", "Shailika", "Seema", "Gargi", "Neha", "Kavita" … */
   voice: "",
-  /* Chhaya is a little girl: her voice is played slightly higher (1 = Maya's normal voice). */
-  voiceStyle: { pitch: 1.14 },
+  /* Voice speed + pitch together (the browser can't change one without the other).
+     1 = Maya's normal speed. 1.05 = a little younger/faster, 0.95 = slower/deeper. */
+  voiceStyle: { pitch: 1.0 },
 
   /* How the wake word "छाया" is heard:
      "auto"    = Chrome's free recogniser on computers/Android; on iPad/iPhone (where that
@@ -1072,7 +1073,7 @@ const Mic = {
     const p = this._record(opts); this._active = p;
     try { return await p; } finally { if (this._active === p) this._active = null; }
   },
-  async _record({ maxMs = 15000, silenceMs = 1500, noSpeechMs = 8000, minSpeechMs = 300, onLevel = null } = {}) {
+  async _record({ maxMs = 15000, silenceMs = 1000, noSpeechMs = 8000, minSpeechMs = 300, onLevel = null } = {}) {
     const stream = await this.init();
     Voice.wake();
     const ctx = Voice.ctx; const src = ctx.createMediaStreamSource(stream); const an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
@@ -1108,7 +1109,7 @@ const Mic = {
           const isVoice = rms > (spoke ? keepThr : onThr);
           if (isVoice) { if (!spoke) firstVoice = t; spoke = true; lastVoice = t; voiced += t - lastT; }
           else if (!spoke) this.noise = this.noise * 0.995 + rms * 0.005;  // learn the room while waiting
-          const needSilence = voiced < 1200 ? silenceMs + 500 : silenceMs; // short start -> allow a thinking pause
+          const needSilence = voiced < 1200 ? silenceMs + 400 : silenceMs; // short start -> allow a thinking pause
           if ((spoke && t - lastVoice > needSilence) || t - t0 > maxMs || (!spoke && t - t0 > noSpeechMs)) { rec.stop(); return; }
         }
         const lvl = Math.min(1, rms * 9); const b = buddy(); if (b) b.style.setProperty("--lvl", lvl.toFixed(3)); onLevel && onLevel(lvl);
@@ -2485,11 +2486,11 @@ document.addEventListener("pointerdown", (e) => {
 render();
 Start.show();
 Hardware.autoConnect();
-if (Native.available) {
-  // Inside the iPad app sound and microphone may start without a tap, so Chhaya starts by herself.
-  Native.start();
-  setTimeout(() => Start.begin(), 800);
-}
+// iPadOS keeps the page's audio engine (which also measures the voice level for "छाया")
+// off until the screen is touched, so Chhaya still starts with one tap on "शुरू करें".
+if (Native.available) Native.start();
+// Any touch re-enables sound + listening if the iPad paused them (sleep, a call, Control Centre).
+document.addEventListener("pointerdown", () => { if (state.started) Voice.wake(); }, true);
 if (QS.has("box")) setTimeout(() => BoxSettings.open(), 1200);
 
 /* Keep the voice server warm so the first answer after a quiet spell is quick
