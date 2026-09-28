@@ -25,6 +25,9 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html{background:#fff}
+/* In the iPad app the web view itself doesn't scroll (no rubber-banding), so each screen scrolls inside #app. */
+html.inapp,html.inapp body{height:100%;overflow:hidden}
+html.inapp #app{height:100dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 body{min-height:100dvh;font-family:'Mukta',system-ui,sans-serif;color:#111;background:#fff;overflow-x:hidden}
 button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit}
 img{max-width:100%}
@@ -875,7 +878,7 @@ function render() {
   if (name !== "camera") Camera.stop();
   Buddy.detach();
   $("#app").innerHTML = (screens[name] || screens.home)(arg);
-  window.scrollTo(0, 0);
+  window.scrollTo(0, 0); $("#app").scrollTop = 0;
   if ($("#buddy")) Buddy.attach($("#buddy"));
   if (name === "call") Calls.bindVideo();
 }
@@ -2613,7 +2616,7 @@ const Health = {
       });
       document.body.appendChild(d);
       setInterval(() => {
-        txt.textContent = `v30.8${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
+        txt.textContent = `v30.9${Native.available ? " app" : ""} ${location.protocol} busy:${Assistant.busy} state:${Buddy.state} mic:${Mic.alive()} audio:${Voice.ctx && Voice.ctx.state} ` +
           `level:${(Mic.level || 0).toFixed(3)} noise:${Mic.noise.toFixed(3)} hw:${Hardware.connected ? "on" : "off"}${Hardware.hasNative ? "/" + Hardware.box.native : ""}\nwake:${JSON.stringify(Wake.debug)}\n` + Diag.lines.join("\n");
       }, 500);
     }
@@ -2735,6 +2738,7 @@ Hardware.autoConnect();
 // iPadOS keeps the page's audio engine (which also measures the voice level for "छाया")
 // off until the screen is touched, so Chhaya still starts with one tap on "शुरू करें".
 if (Native.available) {
+  document.documentElement.classList.add("inapp");
   Native.start();
   Native.on("micLevel", (d) => { const l = (d && d.level) || 0; Mic.level = l; const b = document.getElementById("buddy"); if (b) b.style.setProperty("--lvl", l.toFixed(3)); });
 }
