@@ -1,8 +1,10 @@
 # Humidity Wave – ESP32 LED panel
 
-Twisting-ribbon wave animation for a 694-LED oval WS2812B panel. The wave travels
-left → right. The front face of the ribbon is Lilac (`#C4A3D6`) and the back face is
-Blush (`#DDB0BE`), with the rest of the Humidity palette blended in as it twists.
+Ocean-swell ribbon animation for a 694-LED oval WS2812B panel. A dotted-mesh ribbon
+rides a swell left → right: uneven wave heights, sharp crests, flat troughs and soft
+edges. It slowly rolls over as it goes, and the exact pattern practically never repeats.
+The front face of the ribbon is Lilac (`#C4A3D6`) and the back face is Blush (`#DDB0BE`),
+with the rest of the Humidity palette blended in as it rolls.
 
 `preview.mp4` shows a render of the sketch's actual output.
 
@@ -23,8 +25,10 @@ row 1 runs right→left, row 2 left→right, and so on, ending at the left end o
    - `DATA_PIN`: the GPIO wired to the panel's DIN (default 5)
    - `MAX_BRIGHTNESS`: 0–255 (default 90)
    - `MAX_MILLIAMPS`: keep this below your 5 V supply's rating (default 4000 mA)
-   - `WAVE_PERIOD_MS`, `TWIST_PERIOD_MS`: animation speed
-   - `WAVE_AMPLITUDE`, `RIBBON_HALF_W`, `RIBBON_MIN_W`: shape of the ribbon
+   - `SWELL_PERIOD_MS`, `CHOP_PERIOD_MS`, `ROLL_PERIOD_MS`: animation speed (lower = faster)
+   - `SWELL_AMPLITUDE`, `CHOP_AMPLITUDE`, `CREST_SHARPNESS`: wave height and shape
+   - `RIBBON_HALF_W`, `RIBBON_MIN_W`, `EDGE_SOFTNESS`, `HALO`: ribbon thickness and edges
+   - `MESH_STRENGTH`, `MESH_SPACING`: how visible the dotted mesh is (0 = solid ribbon)
 4. Upload.
 
 **Wiring check:** uncomment `#define WIRING_TEST`. You should see LED #0 blue at the

@@ -12,7 +12,8 @@
  *   Row 1 runs right -> left, row 2 left -> right, row 3 right -> left, ...
  *
  * Animation:
- *   A glowing ribbon travels left -> right as a wave and twists as it goes.
+ *   A glowing, dotted-mesh ribbon rides an ocean swell left -> right: uneven
+ *   wave heights, sharp crests, flat troughs, and a slow roll as it goes.
  *   Front face of the ribbon = Lilac (#C4A3D6), back face = Blush (#DDB0BE),
  *   with the other Humidity shades blended in between while it turns.
  */
@@ -32,12 +33,22 @@
 // lights the first LED of every row red and the last LED green.
 // #define WIRING_TEST
 
-const uint32_t WAVE_PERIOD_MS   = 6000;  // time for one wave to cross the panel (lower = faster)
-const uint32_t TWIST_PERIOD_MS  = 4000;  // time for one full twist to pass a point
-const uint32_t RIPPLE_PERIOD_MS = 4200;  // time for the small secondary ripple
-const float WAVE_AMPLITUDE = 3.2f;  // how far the ribbon swings up/down (in rows)
-const float RIBBON_HALF_W  = 4.2f;  // half-width of the ribbon when seen face-on (rows)
-const float RIBBON_MIN_W   = 0.9f;  // half-width when seen edge-on (keeps a thin line)
+// Ocean swell. The periods don't divide into each other, so the exact
+// pattern practically never repeats.
+const uint32_t SWELL_PERIOD_MS = 7000;   // main swell crossing the panel (lower = faster)
+const uint32_t CHOP_PERIOD_MS  = 4300;   // shorter waves riding on the swell
+const uint32_t SET_PERIOD_MS   = 17000;  // "sets" of bigger waves rolling through
+const uint32_t ROLL_PERIOD_MS  = 9000;   // slow roll of the ribbon (front <-> back face)
+const uint32_t MESH_PERIOD_MS  = 900;    // mesh lines travelling with the water
+const float SWELL_AMPLITUDE = 3.4f;  // height of the main swell (rows)
+const float CHOP_AMPLITUDE  = 0.7f;  // height of the small waves (rows)
+const float CREST_SHARPNESS = 0.28f; // 0 = plain sine, higher = peakier crests, flatter troughs
+const float RIBBON_HALF_W   = 2.6f;  // half-width of the ribbon when seen face-on (rows)
+const float RIBBON_MIN_W    = 0.9f;  // half-width when seen edge-on (keeps a thin line)
+const float EDGE_SOFTNESS   = 1.4f;  // rows over which the ribbon edge fades out (inward)
+const float HALO            = 0.18f; // faint glow just outside the ribbon
+const float MESH_STRENGTH   = 0.8f;  // 0 = solid ribbon, 1 = only mesh dots visible
+const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
 // ---------------------------------------------------------------------------
 // PANEL GEOMETRY
@@ -118,51 +129,119 @@ static inline float phase(uint32_t ms, uint32_t periodMs) {
   return (float)(ms % periodMs) / (float)periodMs;
 }
 
-void renderWave(uint32_t ms) {
+// Per-column values of the ribbon. Rows are centred, so a column sits on a
+// half-LED grid: slot = 2 * x, where x = 0 .. MAX_ROW_LEN - 1.
+struct Column {
+  float yCentre;  // row of the ribbon centre line
+  float halfW;    // visible half-thickness (rows)
+  float cosT;     // ribbon roll: +1 front face, -1 back face, 0 edge-on
+  float sinT;
+  float across;   // 0..1 brightness of the cross-mesh line at this column
+  float crest;    // 0..1, 1 on top of a wave crest
+};
+const uint8_t NUM_SLOTS = 2 * (MAX_ROW_LEN - 1) + 1;
+Column columns[NUM_SLOTS];
+
+// Second-order (Stokes) wave: sharper crests and flatter troughs than a sine.
+// Returns the height (up is positive) and its slope with respect to theta.
+static inline float stokes(float theta, float amp, float *slope) {
+  float s1 = sinf(theta), c1 = cosf(theta);
+  float s2 = 2.0f * s1 * c1, c2 = c1 * c1 - s1 * s1;
+  *slope = -amp * (s1 + 2.0f * CREST_SHARPNESS * s2);
+  return amp * (c1 + CREST_SHARPNESS * c2);
+}
+
+void computeColumns(uint32_t ms) {
   const float TWO_PI_F = 6.2831853f;
   const float midRow = (NUM_ROWS - 1) * 0.5f;
-  const float wavePh   = phase(ms, WAVE_PERIOD_MS);
-  const float twistPh  = phase(ms, TWIST_PERIOD_MS);
-  const float ripplePh = phase(ms, RIPPLE_PERIOD_MS);
+  const float swellPh = phase(ms, SWELL_PERIOD_MS);
+  const float chopPh  = phase(ms, CHOP_PERIOD_MS);
+  const float setPh   = phase(ms, SET_PERIOD_MS);
+  const float rollPh  = phase(ms, ROLL_PERIOD_MS);
+  const float meshPh  = phase(ms, MESH_PERIOD_MS);
+  const float meshLines = (MAX_ROW_LEN - 1) / MESH_SPACING;
+
+  for (uint8_t slot = 0; slot < NUM_SLOTS; slot++) {
+    float u = (slot * 0.5f) / (MAX_ROW_LEN - 1);  // 0 = left edge, 1 = right edge
+    Column &col = columns[slot];
+
+    // Bigger and smaller waves arrive in groups, like an ocean swell.
+    float setEnv = 0.62f + 0.38f * sinf(TWO_PI_F * (0.45f * u - setPh));
+
+    // (k * u - phase) moves every crest from left to right.
+    float slope1, slope2;
+    float h1 = stokes(TWO_PI_F * (1.0f * u - swellPh), SWELL_AMPLITUDE * setEnv, &slope1);
+    float h2 = stokes(TWO_PI_F * (2.2f * u - chopPh) + 0.7f, CHOP_AMPLITUDE, &slope2);
+    float height = h1 + h2;
+    col.yCentre = midRow - height;  // rows count downward, so up = smaller row
+
+    // Steepness of the water surface in rows per LED column
+    float slope = (slope1 * 1.0f + slope2 * 2.2f) * TWO_PI_F / (MAX_ROW_LEN - 1);
+
+    // The ribbon slowly rolls, and tips further over on the steep face of a wave.
+    float theta = TWO_PI_F * (0.45f * u - rollPh) + 1.4f * slope;
+    col.cosT = cosf(theta);
+    col.sinT = sinf(theta);
+    col.halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
+
+    // Cross lines of the mesh drift right with the water.
+    float a = 0.5f + 0.5f * cosf(TWO_PI_F * (u * meshLines - meshPh));
+    col.across = a * a * a;  // cubed = thinner lines, clearer dots
+
+    col.crest = clamp01(h1 / (SWELL_AMPLITUDE * (1.0f + CREST_SHARPNESS)));
+  }
+}
+
+void renderWave(uint32_t ms) {
+  const float TWO_PI_F = 6.2831853f;
   uint32_t totalLevel = 0;  // sum of all channel values, for the power limiter
 
+  computeColumns(ms);
+
   for (uint8_t r = 0; r < NUM_ROWS; r++) {
-    float offset = (MAX_ROW_LEN - ROW_LEN[r]) * 0.5f;  // centre each row
+    uint8_t slotOffset = MAX_ROW_LEN - ROW_LEN[r];  // centring offset in half-LEDs
 
     for (uint8_t c = 0; c < ROW_LEN[r]; c++) {
-      float u = (offset + c) / (MAX_ROW_LEN - 1);  // 0 = left edge, 1 = right edge
-
-      // Ribbon centre line: main wave plus a smaller, faster wave for an organic feel.
-      // Using (u - phase) moves every crest from left to right.
-      float yCentre = midRow
-                    + WAVE_AMPLITUDE * sinf(TWO_PI_F * (u - wavePh))
-                    + 0.8f * sinf(TWO_PI_F * (2.3f * u - ripplePh) + 1.3f);
-
-      // Twist angle of the ribbon at this x position
-      float theta = TWO_PI_F * (0.8f * u - twistPh);
-      float cosT = cosf(theta);
-      float sinT = sinf(theta);
-
-      // Visible (projected) half-thickness: wide face-on, thin edge-on
-      float halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(cosT);
-      float s = (r - yCentre) / halfW;  // -1..1 across the ribbon
-      float cover = 1.0f - smoothstep(0.75f, 1.15f, fabsf(s));
-
+      const Column &col = columns[slotOffset + 2 * c];
       uint16_t idx = ledIndex(r, c);
-      if (cover <= 0.0f) {
+
+      // Distance (rows) outside the ribbon edge; negative = inside.
+      float dist = fabsf(r - col.yCentre) - col.halfW;
+      float cover = 1.0f - smoothstep(-EDGE_SOFTNESS, 0.4f, dist);
+      float glow = dist > 0.0f ? HALO / (1.0f + 4.0f * dist * dist) : HALO;
+      if (cover <= 0.0f && glow < 0.03f) {
         strip.setPixelColor(idx, 0);
         continue;
       }
 
-      // 3D shading: the side of the ribbon tilted toward you is brighter,
-      // and edge-on folds get a highlight like in the reference video.
-      float depth = 0.5f + 0.5f * s * sinT;            // 0 = far, 1 = near
-      float light = 0.55f + 0.30f * depth + 0.15f * (1.0f - fabsf(cosT));
-      float level = cover * light * (MAX_BRIGHTNESS / 255.0f);
+      float s = (r - col.yCentre) / col.halfW;  // -1..1 across the ribbon
+
+      // Mesh: lines along the ribbon (fade out when seen edge-on, where they would
+      // squash together) crossed by lines that travel with the wave. Dots where they meet.
+      float faceOn = fabsf(col.cosT);
+      float alongLine = 0.5f + 0.5f * cosf(TWO_PI_F * 2.0f * s);
+      float along = 1.0f + (alongLine - 1.0f) * faceOn;
+      float mesh = (1.0f - MESH_STRENGTH) + MESH_STRENGTH * 0.5f * (col.across + along);
+
+      // 3D shading: the side tilted toward you is brighter, edge-on folds
+      // catch a highlight, and wave crests glint.
+      float depth = 0.5f + 0.5f * s * col.sinT;  // 0 = far, 1 = near
+      float light = 0.5f + 0.3f * depth + 0.15f * (1.0f - faceOn) + 0.2f * col.crest;
+      // Everything above is "how bright it looks". LEDs are linear, so convert
+      // (gamma 2.2) - this keeps fades smooth and lets the mesh gaps go dark.
+      float look = clamp01(cover * mesh * light + glow);
+      float level = look * look * sqrtf(sqrtf(look)) * (MAX_BRIGHTNESS / 255.0f);  // ~look^2.25
 
       // Front face (cos > 0) = Lilac, back face (cos < 0) = Blush
       float rgb[3];
-      paletteColor((1.0f - cosT) * 0.5f, rgb);
+      paletteColor((1.0f - col.cosT) * 0.5f, rgb);
+
+      // Too dim to show the colour (only one channel would light, giving
+      // stray red/blue specks) - switch the LED off instead.
+      if (level * 255.0f < 3.0f) {
+        strip.setPixelColor(idx, 0);
+        continue;
+      }
 
       uint8_t out[3];
       for (uint8_t k = 0; k < 3; k++) {
