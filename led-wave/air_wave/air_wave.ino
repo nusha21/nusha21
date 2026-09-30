@@ -111,6 +111,32 @@ uint32_t themeChangedAt = 0;  // millis() of the last change
 bool     autoCycle = true;
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 3D RIBBON DATA
+// (Types live up here, before any function: the Arduino IDE auto-inserts
+// function prototypes above the first function, and they need these types.)
+// ---------------------------------------------------------------------------
+// The ribbon is sampled as a grid: NUM_SLICES along its length, SLICE_POINTS
+// across. Each point is projected with perspective and "splatted" onto a
+// half-LED grid, adding light. Folds and edge-on parts pile up more surface
+// per LED, so they glow brighter - that is what makes it read as 3D.
+const uint16_t NUM_SLICES   = 160;
+const uint8_t  SLICE_POINTS = 20;
+
+struct Slice {
+  float x, y, z;     // centre line
+  float ay, az;      // half cross-section vector (already tilted toward the camera)
+};
+Slice slices[NUM_SLICES];
+
+struct Bulge {
+  float pos, sigma, amount, sign;
+};
+const uint8_t MAX_BULGES = 8;
+
+float glowGrid[NUM_ROWS][GRID_W];   // accumulated light
+float colorGrid[NUM_ROWS][GRID_W];  // accumulated colour position (weighted)
+
 Adafruit_NeoPixel strip(NUM_LEDS, DATA_PIN, NEO_GRB + NEO_KHZ800);
 uint16_t rowStart[NUM_ROWS];  // index of the first LED (in wiring order) of each row
 
@@ -204,27 +230,6 @@ void updateTheme(uint32_t ms) {
 // ---------------------------------------------------------------------------
 // 3D RIBBON
 // ---------------------------------------------------------------------------
-// The ribbon is sampled as a grid: NUM_SLICES along its length, SLICE_POINTS
-// across. Each point is projected with perspective and "splatted" onto a
-// half-LED grid, adding light. Folds and edge-on parts pile up more surface
-// per LED, so they glow brighter - that is what makes it read as 3D.
-const uint16_t NUM_SLICES   = 160;
-const uint8_t  SLICE_POINTS = 20;
-
-struct Slice {
-  float x, y, z;     // centre line
-  float ay, az;      // half cross-section vector (already tilted toward the camera)
-};
-Slice slices[NUM_SLICES];
-
-struct Bulge {
-  float pos, sigma, amount, sign;
-};
-const uint8_t MAX_BULGES = 8;
-
-float glowGrid[NUM_ROWS][GRID_W];   // accumulated light
-float colorGrid[NUM_ROWS][GRID_W];  // accumulated colour position (weighted)
-
 // Find the bulges alive at time ms.
 uint8_t activeBulges(uint32_t ms, Bulge *out) {
   uint8_t n = 0;
