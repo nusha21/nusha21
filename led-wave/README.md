@@ -1,7 +1,7 @@
 # Humidity Wave – ESP32 LED panel
 
-Ocean-swell ribbon animation for a 694-LED oval WS2812B panel. A dotted-mesh ribbon
-rides a swell left → right: uneven wave heights, sharp crests, flat troughs and soft
+Ocean-swell ribbon animation for a 694-LED oval WS2812B panel. A ribbon of
+Perlin-noise particles rides a swell left → right: uneven wave heights, sharp crests, flat troughs and soft
 edges. It slowly rolls over as it goes, and the exact pattern practically never repeats.
 The front face of the ribbon is Lilac (`#C4A3D6`) and the back face is Blush (`#DDB0BE`),
 with the rest of the Humidity palette blended in as it rolls.
@@ -30,6 +30,11 @@ row 1 runs right→left, row 2 left→right, and so on, ending at the left end o
    - `RIBBON_HALF_W`, `RIBBON_MIN_W`, `EDGE_SOFTNESS`, `HALO`: ribbon thickness and edges
    - `MESH_STRENGTH`, `MESH_SPACING`: how visible the dotted mesh is (0 = solid ribbon)
    - `ORGANIC`: how alive the water feels (0 = perfectly regular, 1 = default, ~1.5 = rougher)
+   - `DISPERSION`: how much the ribbon breaks up into scattered particles (0 = solid)
+   - `GRAIN`: particle size (higher = finer dots)
+   - `NOISE_WARP`: how much the Perlin noise billows the ribbon's shape
+   - `COLOR_MIX`: noise patches of Lilac/Blush mixed through the ribbon
+   - `NOISE_SPEED`, `NOISE_FLOW`: how fast the noise churns and drifts
 4. Upload.
 
 **Wiring check:** uncomment `#define WIRING_TEST`. You should see LED #0 blue at the

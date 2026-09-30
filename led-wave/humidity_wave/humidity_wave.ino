@@ -47,12 +47,20 @@ const float RIBBON_HALF_W   = 3.4f;  // half-width of the ribbon when seen face-
 const float RIBBON_MIN_W    = 1.9f;  // half-width when seen edge-on (keeps a solid band)
 const float EDGE_SOFTNESS   = 0.9f;  // rows over which the ribbon edge fades out (inward)
 const float HALO            = 0.18f; // faint glow just outside the ribbon
-const float MESH_STRENGTH   = 0.5f;  // 0 = solid ribbon, 1 = only mesh dots visible
+const float MESH_STRENGTH   = 0.2f;  // 0 = solid ribbon, 1 = only mesh dots visible
 const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
 // How "alive" the water feels: uneven speed, wandering edges, drifting light.
 // 0 = perfectly regular wave, 1 = default, up to ~1.5 for a rougher sea.
 const float ORGANIC         = 1.0f;
+
+// Perlin noise texture
+const float NOISE_WARP      = 2.2f;  // rows the noise pushes the ribbon around (billowing)
+const float DISPERSION      = 1.0f;  // 0 = solid ribbon, 1 = edges break into scattered dots
+const float GRAIN           = 0.7f;  // size of the particle clumps (higher = finer dots)
+const float COLOR_MIX       = 0.35f; // noise patches of Lilac/Blush mixed into each face
+const float NOISE_SPEED     = 0.35f; // how fast the noise evolves (the water "boils")
+const float NOISE_FLOW      = 3.0f;  // LEDs per second the texture drifts left -> right
 
 // ---------------------------------------------------------------------------
 // PANEL GEOMETRY
@@ -148,14 +156,64 @@ struct Column {
 const uint8_t NUM_SLOTS = 2 * (MAX_ROW_LEN - 1) + 1;
 Column columns[NUM_SLOTS];
 
-// Smooth pseudo-random wobble in about -1..1: three sines at unrelated
-// frequencies, some drifting left and some right, so it never looks periodic.
-static inline float wobble(float u, float p1, float p2, float p3, float seed) {
-  const float TWO_PI_F = 6.2831853f;
-  return 0.5f  * sinf(TWO_PI_F * (1.3f * u + p1) + seed)
-       + 0.3f  * sinf(TWO_PI_F * (2.9f * u - p2) + 2.1f * seed)
-       + 0.2f  * sinf(TWO_PI_F * (5.1f * u + p3) + 3.7f * seed);
+// ---------------------------------------------------------------------------
+// PERLIN NOISE  (Ken Perlin's "improved noise", 3D, returns about -1..1)
+// It repeats every 256 units on each axis, which lets time wrap seamlessly.
+// ---------------------------------------------------------------------------
+static const uint8_t PERM[256] = {
+  151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
+  190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,
+  125,136,171,168,68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,230,220,
+  105,92,41,55,46,245,40,244,102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,
+  135,130,116,188,159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,
+  82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,119,248,152,2,44,154,163,70,221,
+  153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,112,104,218,246,97,228,
+  251,34,242,193,238,210,144,12,191,179,162,241,81,51,145,235,249,14,239,107,49,192,214,31,181,199,106,
+  157,184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,195,78,
+  66,215,61,156,180
+};
+
+static inline uint8_t perm(int i) { return PERM[i & 255]; }
+static inline float fade(float t) { return t * t * t * (t * (t * 6.0f - 15.0f) + 10.0f); }
+static inline float lerpf(float a, float b, float t) { return a + t * (b - a); }
+
+static inline float grad(uint8_t hash, float x, float y, float z) {
+  uint8_t h = hash & 15;
+  float u = h < 8 ? x : y;
+  float v = h < 4 ? y : (h == 12 || h == 14 ? x : z);
+  return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
 }
+
+float perlin(float x, float y, float z) {
+  float fx = floorf(x), fy = floorf(y), fz = floorf(z);
+  int X = (int)fx & 255, Y = (int)fy & 255, Z = (int)fz & 255;
+  x -= fx; y -= fy; z -= fz;
+  float u = fade(x), v = fade(y), w = fade(z);
+
+  uint8_t A = perm(X) + Y, AA = perm(A) + Z, AB = perm(A + 1) + Z;
+  uint8_t B = perm(X + 1) + Y, BA = perm(B) + Z, BB = perm(B + 1) + Z;
+
+  return lerpf(lerpf(lerpf(grad(perm(AA), x, y, z),         grad(perm(BA), x - 1, y, z), u),
+                     lerpf(grad(perm(AB), x, y - 1, z),     grad(perm(BB), x - 1, y - 1, z), u), v),
+               lerpf(lerpf(grad(perm(AA + 1), x, y, z - 1), grad(perm(BA + 1), x - 1, y, z - 1), u),
+                     lerpf(grad(perm(AB + 1), x, y - 1, z - 1), grad(perm(BB + 1), x - 1, y - 1, z - 1), u), v),
+               w);
+}
+
+// Two octaves: big slow shapes plus finer detail.
+static inline float fbm(float x, float y, float z) {
+  // Scale factors are exact integers so the 256-unit time wrap stays seamless.
+  return 0.7f * perlin(x, y, z) + 0.3f * perlin(2.0f * x, 2.0f * y + 17.0f, 2.0f * z + 31.0f);
+}
+
+// A noise-space clock moving at unitsPerSec, wrapped at 256 (the noise period)
+// so it stays precise and seamless however long the ESP32 runs. Each noise
+// layer gets its own clock: scaling a wrapped clock afterwards would jump.
+static inline float noiseTime(uint32_t ms, float unitsPerSec) {
+  return 256.0f * phase(ms, (uint32_t)(256000.0f / unitsPerSec));
+}
+
+float warpFlow, warpZ, grainFlow, grainZ;  // used per pixel in renderWave()
 
 // Second-order (Stokes) wave: sharper crests and flatter troughs than a sine.
 // Returns the height (up is positive) and its slope with respect to theta.
@@ -177,7 +235,14 @@ void computeColumns(uint32_t ms) {
   const float chopPh  = phase(ms, CHOP_PERIOD_MS) + 0.03f * ease;
   const float setPh   = phase(ms, SET_PERIOD_MS);
   const float rollPh  = phase(ms, ROLL_PERIOD_MS) + 0.05f * ease;
-  const float n1 = phase(ms, 5300), n2 = phase(ms, 6700), n3 = phase(ms, 3900);
+  const float colFlow     = noiseTime(ms, NOISE_FLOW * 3.0f / (MAX_ROW_LEN - 1));
+  const float shimmerFlow = noiseTime(ms, NOISE_FLOW * 5.0f / (MAX_ROW_LEN - 1));
+  const float colZ        = noiseTime(ms, NOISE_SPEED);
+  const float heightZ     = noiseTime(ms, NOISE_SPEED * 0.6f);
+  warpFlow  = noiseTime(ms, NOISE_FLOW * 0.08f);
+  warpZ     = noiseTime(ms, NOISE_SPEED);
+  grainFlow = noiseTime(ms, NOISE_FLOW * GRAIN);
+  grainZ    = noiseTime(ms, NOISE_SPEED * 1.8f);
   const float meshPh  = phase(ms, MESH_PERIOD_MS);
   const float meshLines = (MAX_ROW_LEN - 1) / MESH_SPACING;
 
@@ -193,7 +258,7 @@ void computeColumns(uint32_t ms) {
     float h1 = stokes(TWO_PI_F * (1.0f * u - swellPh), SWELL_AMPLITUDE * setEnv, &slope1);
     float h2 = stokes(TWO_PI_F * (2.2f * u - chopPh) + 0.7f, CHOP_AMPLITUDE, &slope2);
     float height = h1 + h2;
-    height += ORGANIC * 0.5f * wobble(u, n1, n2, n3, 0.0f);
+    height += ORGANIC * 0.8f * perlin(3.0f * u - colFlow, 0.5f, heightZ);
     col.yCentre = midRow - height;  // rows count downward, so up = smaller row
 
     // Steepness of the water surface in rows per LED column
@@ -205,9 +270,9 @@ void computeColumns(uint32_t ms) {
     col.sinT = sinf(theta);
     float halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
     // Top and bottom edges wander on their own, so the thickness breathes.
-    col.halfTop = halfW * (1.0f + ORGANIC * 0.16f * wobble(u, n2, n3, n1, 1.0f));
-    col.halfBot = halfW * (1.0f + ORGANIC * 0.16f * wobble(u, n3, n1, n2, 2.0f));
-    col.shimmer = 1.0f + ORGANIC * 0.14f * wobble(u, n1, n3, n2, 3.0f);
+    col.halfTop = halfW * (1.0f + ORGANIC * 0.3f * perlin(4.0f * u, 10.5f, colZ));
+    col.halfBot = halfW * (1.0f + ORGANIC * 0.3f * perlin(4.0f * u, 20.5f, colZ));
+    col.shimmer = 1.0f + ORGANIC * 0.25f * perlin(5.0f * u - shimmerFlow, 30.5f, colZ);
 
     // Cross lines of the mesh drift right with the water.
     float a = 0.5f + 0.5f * cosf(TWO_PI_F * (u * meshLines - meshPh));
@@ -229,18 +294,33 @@ void renderWave(uint32_t ms) {
     for (uint8_t c = 0; c < ROW_LEN[r]; c++) {
       const Column &col = columns[slotOffset + 2 * c];
       uint16_t idx = ledIndex(r, c);
+      float x = slotOffset * 0.5f + c;  // LED position from the left edge
+
+      // Perlin domain warp: push this LED's row position around with a slowly
+      // flowing noise field, so the ribbon billows instead of following a curve.
+      float warp = fbm(x * 0.08f - warpFlow, r * 0.16f, warpZ);
+      float y = r + NOISE_WARP * ORGANIC * warp;
 
       // Distance (rows) outside the ribbon edge; negative = inside.
-      float halfW = (r < col.yCentre) ? col.halfTop : col.halfBot;
-      float dist = fabsf(r - col.yCentre) - halfW;
-      float cover = 1.0f - smoothstep(-EDGE_SOFTNESS, 0.4f, dist);
+      float halfW = (y < col.yCentre) ? col.halfTop : col.halfBot;
+      float dist = fabsf(y - col.yCentre) - halfW;
+      float cover = 1.0f - smoothstep(-EDGE_SOFTNESS - 1.5f, 1.8f, dist);
+
+      // Dispersion: finer noise decides which LEDs light. The core stays dense,
+      // the edges break up into drifting dots, and a few stray ones float outside.
+      float grain = perlin(x * GRAIN - grainFlow, r * GRAIN * 1.3f, grainZ + 100.0f);
+      float density = cover + DISPERSION * 0.8f * grain;
+      float lit = smoothstep(0.35f, 0.75f, density);
       float glow = dist > 0.0f ? HALO / (1.0f + 4.0f * dist * dist) : HALO;
-      if (cover <= 0.0f && glow < 0.03f) {
+      glow *= clamp01(0.5f + grain);
+      if (lit <= 0.0f && glow < 0.03f) {
         strip.setPixelColor(idx, 0);
         continue;
       }
 
-      float s = (r - col.yCentre) / halfW;  // -1..1 across the ribbon
+      float s = (y - col.yCentre) / halfW;  // -1..1 across the ribbon
+      if (s < -1.0f) s = -1.0f;
+      if (s > 1.0f) s = 1.0f;
 
       // Mesh: lines along the ribbon (fade out when seen edge-on, where they would
       // squash together) crossed by lines that travel with the wave. Dots where they meet.
@@ -255,12 +335,14 @@ void renderWave(uint32_t ms) {
       float light = 0.5f + 0.3f * depth + 0.15f * (1.0f - faceOn) + 0.2f * col.crest;
       // Everything above is "how bright it looks". LEDs are linear, so convert
       // (gamma 2.2) - this keeps fades smooth and lets the mesh gaps go dark.
-      float look = clamp01(cover * mesh * light * col.shimmer + glow);
+      float sparkle = 0.6f + 0.6f * grain;   // particles vary in brightness
+      float look = clamp01(lit * mesh * light * col.shimmer * sparkle + glow);
       float level = look * look * sqrtf(sqrtf(look)) * (MAX_BRIGHTNESS / 255.0f);  // ~look^2.25
 
       // Front face (cos > 0) = Lilac, back face (cos < 0) = Blush
       float rgb[3];
-      paletteColor((1.0f - col.cosT) * 0.5f, rgb);
+      // plus noise patches, so the colours mix like in real light on water.
+      paletteColor((1.0f - col.cosT) * 0.5f + COLOR_MIX * warp, rgb);
 
       // Too dim to show the colour (only one channel would light, giving
       // stray red/blue specks) - switch the LED off instead.
