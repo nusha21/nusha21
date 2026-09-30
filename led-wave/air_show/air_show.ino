@@ -12,16 +12,17 @@
  *   Row 1 runs right -> left, row 2 left -> right, row 3 right -> left, ...
  *
  * The show (loops, with a smooth cross-fade between steps):
- *   Step 1  Dotted wave   20 s  a 3D landscape of dots with a wave rising in
- *                               the centre; colour changes every 5 s:
- *                               Humidity -> Temperature -> PM2.5 -> CO2
+ *   Step 1  Swell wave    20 s  a glowing ribbon riding an ocean swell left ->
+ *                               right (uneven waves, sharp crests, soft edges,
+ *                               slow roll, dotted mesh); colour changes every
+ *                               5 s: Humidity -> Temperature -> PM2.5 -> CO2
  *   Step 2  Four Fields   10 s  Temperature | Humidity | PM2.5 | CO2 columns,
  *                               each with a border, a gap and a centre that a
  *                               wave fills left -> right
- *   Step 3  Orange wave    8 s  the dotted wave in dark / light orange
+ *   Step 3  Orange wave    8 s  the swell wave in dark / light orange
  *
  * Serial Monitor (115200 baud):
- *   1 = hold step 1 (dotted wave, colours keep changing)
+ *   1 = hold step 1 (swell wave, colours keep changing)
  *   2 = hold step 2 (Four Fields)
  *   3 = hold step 3 (orange wave)
  *   a = auto: restart the whole show from the beginning (default)
@@ -43,15 +44,27 @@
 // #define WIRING_TEST
 
 // Show timing
-const uint32_t STEP_MS[3]      = {20000, 10000, 8000};  // dotted wave, Four Fields, orange wave
+const uint32_t STEP_MS[3]      = {20000, 10000, 8000};  // swell wave, Four Fields, orange wave
 const uint32_t CROSSFADE_MS    = 1000;  // blend between steps
-const uint32_t WAVE_COLOUR_MS  = 5000;  // dotted wave: time on each colour
-const uint32_t WAVE_FADE_MS    = 1000;  // dotted wave: colour fade time
+const uint32_t WAVE_COLOUR_MS  = 5000;  // swell wave: time on each colour
+const uint32_t WAVE_FADE_MS    = 1000;  // swell wave: colour fade time
 
-// Dotted wave
-const float WAVE_HUMP       = 3.2f;   // height of the ridge rising in the centre
-const float WAVE_SWELL      = 1.8f;   // extra swell height in the centre
-const float WAVE_GLOW       = 2.4f;   // brightness / density of the dots
+// Swell wave. The periods don't divide into each other, so the exact
+// pattern practically never repeats.
+const uint32_t SWELL_PERIOD_MS = 7000;   // main swell crossing the panel (lower = faster)
+const uint32_t CHOP_PERIOD_MS  = 4300;   // shorter waves riding on the swell
+const uint32_t SET_PERIOD_MS   = 17000;  // "sets" of bigger waves rolling through
+const uint32_t ROLL_PERIOD_MS  = 9000;   // slow roll of the ribbon (front <-> back face)
+const uint32_t MESH_PERIOD_MS  = 900;    // mesh lines travelling with the water
+const float SWELL_AMPLITUDE = 3.4f;  // height of the main swell (rows)
+const float CHOP_AMPLITUDE  = 0.7f;  // height of the small waves (rows)
+const float CREST_SHARPNESS = 0.28f; // 0 = plain sine, higher = peakier crests, flatter troughs
+const float RIBBON_HALF_W   = 2.6f;  // half-width of the ribbon when seen face-on (rows)
+const float RIBBON_MIN_W    = 0.9f;  // half-width when seen edge-on (keeps a thin line)
+const float EDGE_SOFTNESS   = 1.4f;  // rows over which the ribbon edge fades out (inward)
+const float HALO            = 0.18f; // faint glow just outside the ribbon
+const float MESH_STRENGTH   = 0.8f;  // 0 = solid ribbon, 1 = only mesh dots visible
+const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
 // Four Fields
 const uint8_t  BORDER_LEDS    = 2;     // border thickness
@@ -105,7 +118,7 @@ const uint8_t PALETTES[NUM_PALETTES][PALETTE_SIZE][3] = {
 };
 // Four Fields column order, left -> right
 const uint8_t COLUMN_PALETTE[NUM_COLUMNS] = {PAL_TEMPERATURE, PAL_HUMIDITY, PAL_PM25, PAL_CO2};
-// Dotted wave colour order in step 1
+// Swell wave colour order in step 1
 const uint8_t WAVE_ORDER[4] = {PAL_HUMIDITY, PAL_TEMPERATURE, PAL_PM25, PAL_CO2};
 
 // Palettes after gamma correction, reordered so index 0 is the DARKER end.
@@ -118,7 +131,7 @@ Adafruit_NeoPixel strip(NUM_LEDS, DATA_PIN, NEO_GRB + NEO_KHZ800);
 uint16_t rowStart[NUM_ROWS];      // index of the first LED (in wiring order) of each row
 
 const uint8_t NUM_STEPS = 3;
-const char *STEP_NAME[NUM_STEPS] = {"Dotted wave", "Four Fields", "Orange wave"};
+const char *STEP_NAME[NUM_STEPS] = {"Swell wave", "Four Fields", "Orange wave"};
 bool     autoShow = true;
 uint8_t  step = 0, prevStep = 2;
 uint32_t stepStartedAt = 0;
@@ -131,9 +144,17 @@ bool     firstStep = true;        // no cross-fade on the very first step after 
 float frameA[NUM_LEDS][3];
 float frameB[NUM_LEDS][3];
 
-// Dotted wave light buffers (half-LED grid)
-float glowGrid[NUM_ROWS][GRID_W];
-float heightGrid[NUM_ROWS][GRID_W];
+// Swell wave: per-column values of the ribbon. Rows are centred, so a column
+// sits on a half-LED grid: slot = 2 * x, where x = 0 .. MAX_ROW_LEN - 1.
+struct Column {
+  float yCentre;  // row of the ribbon centre line
+  float halfW;    // visible half-thickness (rows)
+  float cosT;     // ribbon roll: +1 front face, -1 back face, 0 edge-on
+  float sinT;
+  float across;   // 0..1 brightness of the cross-mesh line at this column
+  float crest;    // 0..1, 1 on top of a wave crest
+};
+Column columns[GRID_W];
 
 // ---------------------------------------------------------------------------
 // HELPERS
@@ -182,89 +203,101 @@ static inline float ledLevel(float look) {
 }
 
 // ---------------------------------------------------------------------------
-// STEP 1 & 3: DOTTED WAVE
+// STEP 1 & 3: SWELL WAVE
 // ---------------------------------------------------------------------------
-// A grid of dots on a 3D wavy surface, seen from above in perspective.
-// Only the far part of the surface is drawn: there the dots are dense enough
-// to form clean lines on 15 rows.
-const uint8_t DOTS_ACROSS = 52;
-const uint8_t DOTS_DEEP   = 13;
+// Phase helper: 0..1 repeating every periodMs.
+static inline float phase(uint32_t ms, uint32_t periodMs) {
+  return (float)(ms % periodMs) / (float)periodMs;
+}
+
+// Second-order (Stokes) wave: sharper crests and flatter troughs than a sine.
+// Returns the height (up is positive) and its slope with respect to theta.
+static inline float stokes(float theta, float amp, float *slope) {
+  float s1 = sinf(theta), c1 = cosf(theta);
+  float s2 = 2.0f * s1 * c1, c2 = c1 * c1 - s1 * s1;
+  *slope = -amp * (s1 + 2.0f * CREST_SHARPNESS * s2);
+  return amp * (c1 + CREST_SHARPNESS * c2);
+}
+
+void computeSwellColumns(uint32_t ms) {
+  const float TWO_PI_F = 6.2831853f;
+  const float midRow = (NUM_ROWS - 1) * 0.5f;
+  const float swellPh = phase(ms, SWELL_PERIOD_MS);
+  const float chopPh  = phase(ms, CHOP_PERIOD_MS);
+  const float setPh   = phase(ms, SET_PERIOD_MS);
+  const float rollPh  = phase(ms, ROLL_PERIOD_MS);
+  const float meshPh  = phase(ms, MESH_PERIOD_MS);
+  const float meshLines = (MAX_ROW_LEN - 1) / MESH_SPACING;
+
+  for (uint8_t slot = 0; slot < GRID_W; slot++) {
+    float u = (slot * 0.5f) / (MAX_ROW_LEN - 1);  // 0 = left edge, 1 = right edge
+    Column &col = columns[slot];
+
+    // Bigger and smaller waves arrive in groups, like an ocean swell.
+    float setEnv = 0.62f + 0.38f * sinf(TWO_PI_F * (0.45f * u - setPh));
+
+    // (k * u - phase) moves every crest from left to right.
+    float slope1, slope2;
+    float h1 = stokes(TWO_PI_F * (1.0f * u - swellPh), SWELL_AMPLITUDE * setEnv, &slope1);
+    float h2 = stokes(TWO_PI_F * (2.2f * u - chopPh) + 0.7f, CHOP_AMPLITUDE, &slope2);
+    col.yCentre = midRow - (h1 + h2);  // rows count downward, so up = smaller row
+
+    // Steepness of the water surface in rows per LED column
+    float slope = (slope1 * 1.0f + slope2 * 2.2f) * TWO_PI_F / (MAX_ROW_LEN - 1);
+
+    // The ribbon slowly rolls, and tips further over on the steep face of a wave.
+    float theta = TWO_PI_F * (0.45f * u - rollPh) + 1.4f * slope;
+    col.cosT = cosf(theta);
+    col.sinT = sinf(theta);
+    col.halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
+
+    // Cross lines of the mesh drift right with the water.
+    float a = 0.5f + 0.5f * cosf(TWO_PI_F * (u * meshLines - meshPh));
+    col.across = a * a * a;  // cubed = thinner lines, clearer dots
+
+    col.crest = clamp01(h1 / (SWELL_AMPLITUDE * (1.0f + CREST_SHARPNESS)));
+  }
+}
 
 // Writes the frame into out[][3]. Colour fades from palette palFrom to palTo by fade.
-void renderDottedWave(uint32_t ms, uint8_t palFrom, uint8_t palTo, float fade, float out[][3]) {
-  memset(glowGrid, 0, sizeof(glowGrid));
-  memset(heightGrid, 0, sizeof(heightGrid));
-
-  const float a1 = cycle(ms, 5712);   // main swell, left -> right
-  const float a2 = cycle(ms, 10472);  // slower cross swell
-  const float a3 = cycle(ms, 15708);  // ridge drifting forward / back
-  const float a4 = cycle(ms, 8976);   // ridge swelling up / down
-  const float ridgeDepth = 15.0f + 2.0f * sinf(a3);
-  const float ridgeSize  = 0.75f + 0.25f * sinf(a4);
-
-  for (uint8_t j = 0; j < DOTS_DEEP; j++) {
-    float w = 26.0f * j / (DOTS_DEEP - 1);           // 0 = near, 26 = far
-    float nearFade = smoothstep(8.0f, 13.0f, w);     // near rows are too sparse -> hidden
-    if (nearFade <= 0.0f) continue;
-    float rw = (w - ridgeDepth) / 5.0f;
-    float ridge = expf(-rw * rw);
-    float z = w + 7.0f, f = 16.0f / z;
-
-    for (uint8_t i = 0; i < DOTS_ACROSS; i++) {
-      float u = -38.0f + 76.0f * i / (DOTS_ACROSS - 1);
-      float cu = u / 17.0f;
-      float centre = expf(-cu * cu);                 // waves rise in the middle of the panel
-
-      float h = (0.8f + WAVE_SWELL * centre) * sinf(0.13f * u + 0.22f * w - a1)
-              + 0.7f * sinf(0.17f * u - 0.10f * w - a2 + 1.0f)
-              + WAVE_HUMP * ridge * centre * ridgeSize;
-
-      float sx = 24.5f + u * f * 1.25f;
-      float sy = 2.6f + (6.5f - h) * f * 1.9f;
-
-      float hn = clamp01((h + 3.0f) / 8.0f);         // 0 = trough, 1 = crest
-      float light = (0.4f + 0.6f * powf(hn, 1.3f)) * (0.65f + 0.35f * w / 26.0f)
-                  * nearFade * (1.0f - smoothstep(10.5f, 12.5f, sy));
-      if (light <= 0.0f) continue;
-
-      // Blend the dot smoothly into the 4 nearest half-LED slots
-      float gx = sx * 2.0f, gy = sy;
-      int x0 = (int)floorf(gx), y0 = (int)floorf(gy);
-      float fx = gx - x0, fy = gy - y0;
-      for (uint8_t dy = 0; dy < 2; dy++) {
-        int yi = y0 + dy;
-        if (yi < 0 || yi >= NUM_ROWS) continue;
-        float wy = dy ? fy : 1.0f - fy;
-        for (uint8_t dx = 0; dx < 2; dx++) {
-          int xi = x0 + dx;
-          if (xi < 0 || xi >= GRID_W) continue;
-          float wgt = (dx ? fx : 1.0f - fx) * wy * light;
-          glowGrid[yi][xi] += wgt;
-          heightGrid[yi][xi] += wgt * hn;
-        }
-      }
-    }
-  }
+// Front face of the ribbon = darker end of the palette, back face = lighter end.
+void renderSwellWave(uint32_t ms, uint8_t palFrom, uint8_t palTo, float fade, float out[][3]) {
+  const float TWO_PI_F = 6.2831853f;
+  computeSwellColumns(ms);
 
   for (uint8_t r = 0; r < NUM_ROWS; r++) {
-    uint8_t slotOffset = MAX_ROW_LEN - ROW_LEN[r];
+    uint8_t slotOffset = MAX_ROW_LEN - ROW_LEN[r];  // centring offset in half-LEDs
+
     for (uint8_t c = 0; c < ROW_LEN[r]; c++) {
+      const Column &col = columns[slotOffset + 2 * c];
       uint16_t idx = ledIndex(r, c);
-      uint8_t x = slotOffset + 2 * c;
-      float g = glowGrid[r][x] * 0.5f, hsum = heightGrid[r][x] * 0.5f;
-      if (x > 0)          { g += glowGrid[r][x - 1] * 0.25f; hsum += heightGrid[r][x - 1] * 0.25f; }
-      if (x < GRID_W - 1) { g += glowGrid[r][x + 1] * 0.25f; hsum += heightGrid[r][x + 1] * 0.25f; }
+      out[idx][0] = out[idx][1] = out[idx][2] = 0.0f;
 
-      float look = 1.0f - expf(-g * WAVE_GLOW);           // soft saturation
-      float k = clamp01((look - 0.10f) / 0.15f);          // faint light fades out fully
-      look *= k * k * (3.0f - 2.0f * k);
-      if (look < 0.02f) { out[idx][0] = out[idx][1] = out[idx][2] = 0.0f; continue; }
-      look = powf(look, 0.75f);
+      // Distance (rows) outside the ribbon edge; negative = inside.
+      float dist = fabsf(r - col.yCentre) - col.halfW;
+      float cover = 1.0f - smoothstep(-EDGE_SOFTNESS, 0.4f, dist);
+      float glow = dist > 0.0f ? HALO / (1.0f + 4.0f * dist * dist) : HALO;
+      if (cover <= 0.0f && glow < 0.03f) continue;
 
-      float hpos = g > 1e-6f ? hsum / g : 0.0f;           // troughs dark end, crests light end
+      float s = (r - col.yCentre) / col.halfW;  // -1..1 across the ribbon
+
+      // Mesh: lines along the ribbon (fade out when seen edge-on, where they would
+      // squash together) crossed by lines that travel with the wave. Dots where they meet.
+      float faceOn = fabsf(col.cosT);
+      float alongLine = 0.5f + 0.5f * cosf(TWO_PI_F * 2.0f * s);
+      float along = 1.0f + (alongLine - 1.0f) * faceOn;
+      float mesh = (1.0f - MESH_STRENGTH) + MESH_STRENGTH * 0.5f * (col.across + along);
+
+      // 3D shading: the side tilted toward you is brighter, edge-on folds
+      // catch a highlight, and wave crests glint.
+      float depth = 0.5f + 0.5f * s * col.sinT;  // 0 = far, 1 = near
+      float light = 0.5f + 0.3f * depth + 0.15f * (1.0f - faceOn) + 0.2f * col.crest;
+      float look = clamp01(cover * mesh * light + glow);
+
+      float colorPos = (1.0f - col.cosT) * 0.5f;
       float a[3], b[3];
-      paletteColor(palFrom, hpos, a);
-      paletteColor(palTo, hpos, b);
+      paletteColor(palFrom, colorPos, a);
+      paletteColor(palTo, colorPos, b);
       float level = ledLevel(look);
       for (uint8_t i = 0; i < 3; i++) out[idx][i] = (a[i] + (b[i] - a[i]) * fade) * level;
     }
@@ -342,7 +375,7 @@ void renderFourFields(uint32_t ms, uint32_t fillStartedAt, float out[][3]) {
 // SHOW
 // ---------------------------------------------------------------------------
 // endOfAutoStep: the step is fading out at the end of its auto time, so the
-// dotted wave keeps its last colour instead of starting the next colour round.
+// swell wave keeps its last colour instead of starting the next colour round.
 void renderStep(uint8_t s, uint32_t ms, uint32_t startedAt, bool endOfAutoStep, float out[][3]) {
   if (s == 0) {
     // Colour changes every WAVE_COLOUR_MS with a short fade
@@ -352,11 +385,11 @@ void renderStep(uint8_t s, uint32_t ms, uint32_t startedAt, bool endOfAutoStep, 
     uint8_t cur = WAVE_ORDER[n % 4];
     uint8_t prev = WAVE_ORDER[(n + 3) % 4];
     float fade = n == 0 ? 1.0f : clamp01((float)(t % WAVE_COLOUR_MS) / WAVE_FADE_MS);
-    renderDottedWave(ms, prev, cur, fade, out);
+    renderSwellWave(ms, prev, cur, fade, out);
   } else if (s == 1) {
     renderFourFields(ms, startedAt, out);
   } else {
-    renderDottedWave(ms, PAL_ORANGE, PAL_ORANGE, 1.0f, out);
+    renderSwellWave(ms, PAL_ORANGE, PAL_ORANGE, 1.0f, out);
   }
 }
 
@@ -373,7 +406,7 @@ void goToStep(uint8_t s, uint32_t ms, bool wasAuto) {
 void printHelp() {
   Serial.println();
   Serial.println(F("Air Show control:"));
-  Serial.println(F("  1 = hold dotted wave (colours keep changing)"));
+  Serial.println(F("  1 = hold swell wave (colours keep changing)"));
   Serial.println(F("  2 = hold Four Fields"));
   Serial.println(F("  3 = hold orange wave"));
   Serial.println(F("  a = auto: restart the whole show"));

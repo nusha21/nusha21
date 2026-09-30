@@ -59,9 +59,9 @@ A looping show with a smooth 1 s cross-fade between steps:
 
 | Step | Time | Shows |
 |------|------|-------|
-| 1 | 20 s | Dotted 3D wave (hump rising in the centre); colour changes every 5 s: Humidity → Temperature → PM2.5 → CO2 |
+| 1 | 20 s | Swell wave: a glowing ribbon riding an ocean swell left → right (uneven waves, soft edges, slow roll, dotted mesh); colour changes every 5 s: Humidity → Temperature → PM2.5 → CO2 |
 | 2 | 10 s | Four Fields: Temperature / Humidity / PM2.5 / CO2 columns filling with a wave |
-| 3 | 8 s | Dotted wave in dark orange → light orange |
+| 3 | 8 s | Swell wave in dark orange → light orange |
 
 Serial Monitor (115200 baud): `1` / `2` / `3` hold that step, `a` restarts the whole show.
 Timing is set by `STEP_MS`, `CROSSFADE_MS` and `WAVE_COLOUR_MS` at the top of the file.
