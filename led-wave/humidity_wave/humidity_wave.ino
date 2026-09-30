@@ -40,14 +40,14 @@ const uint32_t CHOP_PERIOD_MS  = 4300;   // shorter waves riding on the swell
 const uint32_t SET_PERIOD_MS   = 17000;  // "sets" of bigger waves rolling through
 const uint32_t ROLL_PERIOD_MS  = 9000;   // slow roll of the ribbon (front <-> back face)
 const uint32_t MESH_PERIOD_MS  = 900;    // mesh lines travelling with the water
-const float SWELL_AMPLITUDE = 3.4f;  // height of the main swell (rows)
+const float SWELL_AMPLITUDE = 3.6f;  // height of the main swell (rows)
 const float CHOP_AMPLITUDE  = 0.7f;  // height of the small waves (rows)
 const float CREST_SHARPNESS = 0.28f; // 0 = plain sine, higher = peakier crests, flatter troughs
-const float RIBBON_HALF_W   = 2.6f;  // half-width of the ribbon when seen face-on (rows)
-const float RIBBON_MIN_W    = 0.9f;  // half-width when seen edge-on (keeps a thin line)
-const float EDGE_SOFTNESS   = 1.4f;  // rows over which the ribbon edge fades out (inward)
+const float RIBBON_HALF_W   = 3.4f;  // half-width of the ribbon when seen face-on (rows)
+const float RIBBON_MIN_W    = 1.9f;  // half-width when seen edge-on (keeps a solid band)
+const float EDGE_SOFTNESS   = 0.9f;  // rows over which the ribbon edge fades out (inward)
 const float HALO            = 0.18f; // faint glow just outside the ribbon
-const float MESH_STRENGTH   = 0.8f;  // 0 = solid ribbon, 1 = only mesh dots visible
+const float MESH_STRENGTH   = 0.5f;  // 0 = solid ribbon, 1 = only mesh dots visible
 const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
 // ---------------------------------------------------------------------------
