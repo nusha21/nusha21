@@ -294,11 +294,18 @@ void renderSwellWave(uint32_t ms, uint8_t palFrom, uint8_t palTo, float fade, fl
       float light = 0.5f + 0.3f * depth + 0.15f * (1.0f - faceOn) + 0.2f * col.crest;
       float look = clamp01(cover * mesh * light + glow);
 
+      float level = ledLevel(look);
+      // Too dim to show the colour - switch the LED off (same rule as the
+      // original swell wave). Dim orange turns into red specks, so the orange
+      // palettes (PM2.5 and Orange) use a stricter limit.
+      bool orangey = (palTo == PAL_ORANGE || palTo == PAL_PM25 || palFrom == PAL_PM25);
+      float minLevel = orangey ? 10.0f : 3.0f;
+      if (level * 255.0f < minLevel) continue;
+
       float colorPos = (1.0f - col.cosT) * 0.5f;
       float a[3], b[3];
       paletteColor(palFrom, colorPos, a);
       paletteColor(palTo, colorPos, b);
-      float level = ledLevel(look);
       for (uint8_t i = 0; i < 3; i++) out[idx][i] = (a[i] + (b[i] - a[i]) * fade) * level;
     }
   }
@@ -363,9 +370,11 @@ void renderFourFields(uint32_t ms, uint32_t fillStartedAt, float out[][3]) {
         colorPos = 0.25f + 0.75f * across;
       }
 
+      float level = ledLevel(clamp01(look));
+      if (level * 255.0f < 5.0f) continue;  // too dim to hold its colour
+
       float rgb[3];
       paletteColor(COLUMN_PALETTE[k], colorPos, rgb);
-      float level = ledLevel(clamp01(look));
       for (uint8_t i = 0; i < 3; i++) out[idx][i] = rgb[i] * level;
     }
   }
@@ -465,15 +474,12 @@ void renderFrame(uint32_t ms) {
 
   uint32_t totalLevel = 0;
   for (uint16_t i = 0; i < NUM_LEDS; i++) {
-    uint8_t out[3], brightest = 0;
+    uint8_t out[3];
     for (uint8_t c = 0; c < 3; c++) {
       float v = frameA[i][c];
       if (blend < 1.0f) v = frameB[i][c] + (v - frameB[i][c]) * blend;
       out[c] = (uint8_t)(v + 0.5f);
-      if (out[c] > brightest) brightest = out[c];
     }
-    // Too dim to hold its colour (e.g. dim orange shows as red specks): switch off
-    if (brightest < 6) out[0] = out[1] = out[2] = 0;
     totalLevel += out[0] + out[1] + out[2];
     strip.setPixelColor(i, out[0], out[1], out[2]);
   }
