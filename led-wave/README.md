@@ -31,6 +31,28 @@ Control it from the **Serial Monitor at 115200 baud**:
 
 Picking `1`–`4` holds that colour until you type `a`. Colours work in both patterns.
 
+## Four Fields (`four_fields/four_fields.ino`)
+
+A separate sketch with four sensor columns, left to right: **Temperature | Humidity |
+PM2.5 | CO2**, split by dark 1-LED divider lines ("Perimeter: outside / Centre: inside").
+Each column has a 2-LED border (rows 1–2, 14–15 and the 2 LEDs at each row end) in the
+darker colour of its palette, shimmering gently. Inside that is a 1-LED dark gap, then a
+soft centre in the lighter colour. At start-up a wave flows left → right and fills the
+centres one after another (about 8 s), and then they stay full with soft ripples.
+`four_fields/preview.mp4` shows the sketch's actual output.
+
+Serial Monitor (115200 baud):
+
+| Type | Does |
+|------|------|
+| `1`–`4` | spotlight Temperature / Humidity / PM2.5 / CO2 (the others dim) |
+| `a` | all four equally |
+| `r` | replay the fill wave |
+
+Settings at the top of the file: `DATA_PIN`, `MAX_BRIGHTNESS`, `MAX_MILLIAMPS`,
+`BORDER_LEDS`, `FILL_TIME_MS`, `BORDER_LEVEL`/`BORDER_SHIMMER`, `CENTRE_LEVEL`/
+`CENTRE_RIPPLE`, `WAVE_EDGE_GLOW`, `SPOTLIGHT_DIM`.
+
 ## Panel
 
 | Row | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
