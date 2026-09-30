@@ -12,19 +12,17 @@
  *   Row 1 runs right -> left, row 2 left -> right, row 3 right -> left, ...
  *
  * The show (loops, with a smooth cross-fade between steps):
- *   Step 1  Swell wave    20 s  a glowing ribbon riding an ocean swell left ->
- *                               right (uneven waves, sharp crests, soft edges,
- *                               slow roll, dotted mesh); colour changes every
- *                               5 s: Humidity -> Temperature -> PM2.5 -> CO2
+ *   Step 1  Swell wave    20 s  a glowing ribbon riding a calm ocean swell
+ *                               left -> right (soft edges, slow roll, faint
+ *                               dotted mesh); colour changes every 5 s:
+ *                               Humidity -> Temperature -> PM2.5 -> CO2
  *   Step 2  Four Fields   10 s  Temperature | Humidity | PM2.5 | CO2 columns,
  *                               each with a border, a gap and a centre that a
  *                               wave fills left -> right
- *   Step 3  Orange wave    8 s  the swell wave in dark / light orange
  *
  * Serial Monitor (115200 baud):
  *   1 = hold step 1 (swell wave, colours keep changing)
  *   2 = hold step 2 (Four Fields)
- *   3 = hold step 3 (orange wave)
  *   a = auto: restart the whole show from the beginning (default)
  */
 
@@ -44,26 +42,27 @@
 // #define WIRING_TEST
 
 // Show timing
-const uint32_t STEP_MS[3]      = {20000, 10000, 8000};  // swell wave, Four Fields, orange wave
-const uint32_t CROSSFADE_MS    = 1000;  // blend between steps
+const uint32_t STEP_MS[2]      = {20000, 10000};  // swell wave, Four Fields
+const uint32_t CROSSFADE_MS    = 2000;  // blend between steps
 const uint32_t WAVE_COLOUR_MS  = 5000;  // swell wave: time on each colour
-const uint32_t WAVE_FADE_MS    = 1000;  // swell wave: colour fade time
+const uint32_t WAVE_FADE_MS    = 2000;  // swell wave: colour fade time
 
 // Swell wave. The periods don't divide into each other, so the exact
 // pattern practically never repeats.
-const uint32_t SWELL_PERIOD_MS = 7000;   // main swell crossing the panel (lower = faster)
-const uint32_t CHOP_PERIOD_MS  = 4300;   // shorter waves riding on the swell
-const uint32_t SET_PERIOD_MS   = 17000;  // "sets" of bigger waves rolling through
-const uint32_t ROLL_PERIOD_MS  = 9000;   // slow roll of the ribbon (front <-> back face)
-const uint32_t MESH_PERIOD_MS  = 900;    // mesh lines travelling with the water
-const float SWELL_AMPLITUDE = 3.4f;  // height of the main swell (rows)
-const float CHOP_AMPLITUDE  = 0.7f;  // height of the small waves (rows)
-const float CREST_SHARPNESS = 0.28f; // 0 = plain sine, higher = peakier crests, flatter troughs
+const uint32_t SWELL_PERIOD_MS = 11000;  // main swell crossing the panel (lower = faster)
+const uint32_t CHOP_PERIOD_MS  = 7300;   // shorter waves riding on the swell
+const uint32_t SET_PERIOD_MS   = 26000;  // "sets" of bigger waves rolling through
+const uint32_t ROLL_PERIOD_MS  = 15000;  // slow roll of the ribbon (front <-> back face)
+const uint32_t MESH_PERIOD_MS  = 1900;   // mesh lines travelling with the water
+const float SWELL_AMPLITUDE = 3.1f;  // height of the main swell (rows)
+const float CHOP_AMPLITUDE  = 0.35f; // height of the small waves (rows)
+const float CREST_SHARPNESS = 0.15f; // 0 = plain sine, higher = peakier crests, flatter troughs
+const float ROLL_ON_SLOPE   = 0.9f;  // how much the ribbon tips over on steep wave faces
 const float RIBBON_HALF_W   = 2.6f;  // half-width of the ribbon when seen face-on (rows)
 const float RIBBON_MIN_W    = 0.9f;  // half-width when seen edge-on (keeps a thin line)
 const float EDGE_SOFTNESS   = 1.4f;  // rows over which the ribbon edge fades out (inward)
 const float HALO            = 0.18f; // faint glow just outside the ribbon
-const float MESH_STRENGTH   = 0.8f;  // 0 = solid ribbon, 1 = only mesh dots visible
+const float MESH_STRENGTH   = 0.55f; // 0 = solid ribbon, 1 = only mesh dots visible
 const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
 // Four Fields
@@ -96,9 +95,9 @@ const float COLUMN_RIGHT[NUM_COLUMNS] = {12.25f, 24.75f, 37.25f, 49.0f};
 // COLOURS
 // ---------------------------------------------------------------------------
 const uint8_t PALETTE_SIZE = 6;
-const uint8_t NUM_PALETTES = 5;
-enum { PAL_HUMIDITY, PAL_TEMPERATURE, PAL_PM25, PAL_CO2, PAL_ORANGE };
-const char *PALETTE_NAME[NUM_PALETTES] = {"Humidity", "Temperature", "PM2.5", "CO2", "Orange"};
+const uint8_t NUM_PALETTES = 4;
+enum { PAL_HUMIDITY, PAL_TEMPERATURE, PAL_PM25, PAL_CO2 };
+const char *PALETTE_NAME[NUM_PALETTES] = {"Humidity", "Temperature", "PM2.5", "CO2"};
 const uint8_t PALETTES[NUM_PALETTES][PALETTE_SIZE][3] = {
   { // Humidity: Lilac -> Blush
     {0xC4, 0xA3, 0xD6}, {0xC9, 0xA6, 0xD1}, {0xCE, 0xA8, 0xCD},
@@ -112,9 +111,6 @@ const uint8_t PALETTES[NUM_PALETTES][PALETTE_SIZE][3] = {
   { // CO2: Amber -> Honey
     {0xED, 0xB4, 0x5E}, {0xEE, 0xB8, 0x5F}, {0xEE, 0xBC, 0x61},
     {0xEF, 0xBF, 0x62}, {0xEF, 0xC3, 0x64}, {0xF0, 0xC7, 0x65}},
-  { // Orange: dark orange -> light orange (step 3)
-    {0xC8, 0x50, 0x14}, {0xD8, 0x66, 0x22}, {0xE6, 0x7E, 0x34},
-    {0xF0, 0x96, 0x4A}, {0xF6, 0xAE, 0x68}, {0xF9, 0xC4, 0x8A}},
 };
 // Four Fields column order, left -> right
 const uint8_t COLUMN_PALETTE[NUM_COLUMNS] = {PAL_TEMPERATURE, PAL_HUMIDITY, PAL_PM25, PAL_CO2};
@@ -130,10 +126,10 @@ uint8_t ledPalette[NUM_PALETTES][PALETTE_SIZE][3];
 Adafruit_NeoPixel strip(NUM_LEDS, DATA_PIN, NEO_GRB + NEO_KHZ800);
 uint16_t rowStart[NUM_ROWS];      // index of the first LED (in wiring order) of each row
 
-const uint8_t NUM_STEPS = 3;
-const char *STEP_NAME[NUM_STEPS] = {"Swell wave", "Four Fields", "Orange wave"};
+const uint8_t NUM_STEPS = 2;
+const char *STEP_NAME[NUM_STEPS] = {"Swell wave", "Four Fields"};
 bool     autoShow = true;
-uint8_t  step = 0, prevStep = 2;
+uint8_t  step = 0, prevStep = 1;
 uint32_t stepStartedAt = 0;
 uint32_t prevStepStartedAt = 0;
 bool     prevWasAuto = true;      // the step we are fading out of was part of the auto show
@@ -246,7 +242,7 @@ void computeSwellColumns(uint32_t ms) {
     float slope = (slope1 * 1.0f + slope2 * 2.2f) * TWO_PI_F / (MAX_ROW_LEN - 1);
 
     // The ribbon slowly rolls, and tips further over on the steep face of a wave.
-    float theta = TWO_PI_F * (0.45f * u - rollPh) + 1.4f * slope;
+    float theta = TWO_PI_F * (0.45f * u - rollPh) + ROLL_ON_SLOPE * slope;
     col.cosT = cosf(theta);
     col.sinT = sinf(theta);
     col.halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
@@ -296,9 +292,9 @@ void renderSwellWave(uint32_t ms, uint8_t palFrom, uint8_t palTo, float fade, fl
 
       float level = ledLevel(look);
       // Too dim to show the colour - switch the LED off (same rule as the
-      // original swell wave). Dim orange turns into red specks, so the orange
-      // palettes (PM2.5 and Orange) use a stricter limit.
-      bool orangey = (palTo == PAL_ORANGE || palTo == PAL_PM25 || palFrom == PAL_PM25);
+      // original swell wave). Dim orange turns into red specks, so the
+      // orange PM2.5 palette uses a stricter limit.
+      bool orangey = (palTo == PAL_PM25 || palFrom == PAL_PM25);
       float minLevel = orangey ? 10.0f : 3.0f;
       if (level * 255.0f < minLevel) continue;
 
@@ -326,9 +322,9 @@ static int8_t columnAt(float x) {
 }
 
 void renderFourFields(uint32_t ms, uint32_t fillStartedAt, float out[][3]) {
-  const float shimmerA = cycle(ms, 5712), shimmerB = cycle(ms, 8976), shimmerC = cycle(ms, 3696);
-  const float rippleA  = cycle(ms, 3142), rippleB  = cycle(ms, 4833);
-  const float frontWob = cycle(ms, 2856);
+  const float shimmerA = cycle(ms, 9140), shimmerB = cycle(ms, 14360), shimmerC = cycle(ms, 5914);
+  const float rippleA  = cycle(ms, 5027), rippleB  = cycle(ms, 7733);
+  const float frontWob = cycle(ms, 4570);
 
   uint32_t since = ms - fillStartedAt;
   float progress = since < FILL_DELAY_MS ? 0.0f
@@ -395,10 +391,8 @@ void renderStep(uint8_t s, uint32_t ms, uint32_t startedAt, bool endOfAutoStep, 
     uint8_t prev = WAVE_ORDER[(n + 3) % 4];
     float fade = n == 0 ? 1.0f : clamp01((float)(t % WAVE_COLOUR_MS) / WAVE_FADE_MS);
     renderSwellWave(ms, prev, cur, fade, out);
-  } else if (s == 1) {
-    renderFourFields(ms, startedAt, out);
   } else {
-    renderSwellWave(ms, PAL_ORANGE, PAL_ORANGE, 1.0f, out);
+    renderFourFields(ms, startedAt, out);
   }
 }
 
@@ -417,14 +411,13 @@ void printHelp() {
   Serial.println(F("Swell Show control:"));
   Serial.println(F("  1 = hold swell wave (colours keep changing)"));
   Serial.println(F("  2 = hold Four Fields"));
-  Serial.println(F("  3 = hold orange wave"));
   Serial.println(F("  a = auto: restart the whole show"));
 }
 
 void handleSerial(uint32_t ms) {
   while (Serial.available()) {
     char c = Serial.read();
-    if (c >= '1' && c <= '3') {
+    if (c >= '1' && c <= '2') {
       autoShow = false;
       firstStep = false;
       goToStep(c - '1', ms, false);

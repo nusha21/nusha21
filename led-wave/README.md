@@ -67,6 +67,14 @@ Serial Monitor (115200 baud): `1` / `2` / `3` hold that step, `a` restarts the w
 Timing is set by `STEP_MS`, `CROSSFADE_MS` and `WAVE_COLOUR_MS` at the top of the file.
 `air_show/preview.mp4` shows the sketch's actual output.
 
+## Swell Show (`swell_show/swell_show.ino`)
+
+A calmer version of Air Show without the orange step. The loop is: swell wave (20 s,
+colour every 5 s: Humidity → Temperature → PM2.5 → CO2) → Four Fields (10 s) → repeat,
+with 2 s cross-fades and 2 s colour fades. Motion is about 1.5–2× slower, with softer
+mesh lines, gentler small waves and rounder crests. Serial Monitor: `1` holds the swell
+wave, `2` holds Four Fields, `a` restarts the show. `swell_show/preview.mp4` shows its output.
+
 ## Panel
 
 | Row | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
