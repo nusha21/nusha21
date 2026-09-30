@@ -50,6 +50,10 @@ const float HALO            = 0.18f; // faint glow just outside the ribbon
 const float MESH_STRENGTH   = 0.5f;  // 0 = solid ribbon, 1 = only mesh dots visible
 const float MESH_SPACING    = 4.0f;  // LEDs between the cross lines of the mesh
 
+// How "alive" the water feels: uneven speed, wandering edges, drifting light.
+// 0 = perfectly regular wave, 1 = default, up to ~1.5 for a rougher sea.
+const float ORGANIC         = 1.0f;
+
 // ---------------------------------------------------------------------------
 // PANEL GEOMETRY
 // ---------------------------------------------------------------------------
@@ -133,14 +137,25 @@ static inline float phase(uint32_t ms, uint32_t periodMs) {
 // half-LED grid: slot = 2 * x, where x = 0 .. MAX_ROW_LEN - 1.
 struct Column {
   float yCentre;  // row of the ribbon centre line
-  float halfW;    // visible half-thickness (rows)
+  float halfTop;  // visible half-thickness above the centre line (rows)
+  float halfBot;  // ... and below it; they differ so the ribbon isn't mirrored
   float cosT;     // ribbon roll: +1 front face, -1 back face, 0 edge-on
   float sinT;
   float across;   // 0..1 brightness of the cross-mesh line at this column
   float crest;    // 0..1, 1 on top of a wave crest
+  float shimmer;  // brightness multiplier: slow patches of light drifting across
 };
 const uint8_t NUM_SLOTS = 2 * (MAX_ROW_LEN - 1) + 1;
 Column columns[NUM_SLOTS];
+
+// Smooth pseudo-random wobble in about -1..1: three sines at unrelated
+// frequencies, some drifting left and some right, so it never looks periodic.
+static inline float wobble(float u, float p1, float p2, float p3, float seed) {
+  const float TWO_PI_F = 6.2831853f;
+  return 0.5f  * sinf(TWO_PI_F * (1.3f * u + p1) + seed)
+       + 0.3f  * sinf(TWO_PI_F * (2.9f * u - p2) + 2.1f * seed)
+       + 0.2f  * sinf(TWO_PI_F * (5.1f * u + p3) + 3.7f * seed);
+}
 
 // Second-order (Stokes) wave: sharper crests and flatter troughs than a sine.
 // Returns the height (up is positive) and its slope with respect to theta.
@@ -154,10 +169,15 @@ static inline float stokes(float theta, float amp, float *slope) {
 void computeColumns(uint32_t ms) {
   const float TWO_PI_F = 6.2831853f;
   const float midRow = (NUM_ROWS - 1) * 0.5f;
-  const float swellPh = phase(ms, SWELL_PERIOD_MS);
-  const float chopPh  = phase(ms, CHOP_PERIOD_MS);
+  // Real water doesn't move at a constant speed: nudge the phases back and
+  // forth slowly so the swell surges and eases (about +/-25% speed).
+  const float surge = ORGANIC * sinf(TWO_PI_F * phase(ms, 11300));
+  const float ease  = ORGANIC * sinf(TWO_PI_F * phase(ms, 15700));
+  const float swellPh = phase(ms, SWELL_PERIOD_MS) + 0.04f * surge;
+  const float chopPh  = phase(ms, CHOP_PERIOD_MS) + 0.03f * ease;
   const float setPh   = phase(ms, SET_PERIOD_MS);
-  const float rollPh  = phase(ms, ROLL_PERIOD_MS);
+  const float rollPh  = phase(ms, ROLL_PERIOD_MS) + 0.05f * ease;
+  const float n1 = phase(ms, 5300), n2 = phase(ms, 6700), n3 = phase(ms, 3900);
   const float meshPh  = phase(ms, MESH_PERIOD_MS);
   const float meshLines = (MAX_ROW_LEN - 1) / MESH_SPACING;
 
@@ -173,6 +193,7 @@ void computeColumns(uint32_t ms) {
     float h1 = stokes(TWO_PI_F * (1.0f * u - swellPh), SWELL_AMPLITUDE * setEnv, &slope1);
     float h2 = stokes(TWO_PI_F * (2.2f * u - chopPh) + 0.7f, CHOP_AMPLITUDE, &slope2);
     float height = h1 + h2;
+    height += ORGANIC * 0.5f * wobble(u, n1, n2, n3, 0.0f);
     col.yCentre = midRow - height;  // rows count downward, so up = smaller row
 
     // Steepness of the water surface in rows per LED column
@@ -182,7 +203,11 @@ void computeColumns(uint32_t ms) {
     float theta = TWO_PI_F * (0.45f * u - rollPh) + 1.4f * slope;
     col.cosT = cosf(theta);
     col.sinT = sinf(theta);
-    col.halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
+    float halfW = RIBBON_MIN_W + RIBBON_HALF_W * fabsf(col.cosT);
+    // Top and bottom edges wander on their own, so the thickness breathes.
+    col.halfTop = halfW * (1.0f + ORGANIC * 0.16f * wobble(u, n2, n3, n1, 1.0f));
+    col.halfBot = halfW * (1.0f + ORGANIC * 0.16f * wobble(u, n3, n1, n2, 2.0f));
+    col.shimmer = 1.0f + ORGANIC * 0.14f * wobble(u, n1, n3, n2, 3.0f);
 
     // Cross lines of the mesh drift right with the water.
     float a = 0.5f + 0.5f * cosf(TWO_PI_F * (u * meshLines - meshPh));
@@ -206,7 +231,8 @@ void renderWave(uint32_t ms) {
       uint16_t idx = ledIndex(r, c);
 
       // Distance (rows) outside the ribbon edge; negative = inside.
-      float dist = fabsf(r - col.yCentre) - col.halfW;
+      float halfW = (r < col.yCentre) ? col.halfTop : col.halfBot;
+      float dist = fabsf(r - col.yCentre) - halfW;
       float cover = 1.0f - smoothstep(-EDGE_SOFTNESS, 0.4f, dist);
       float glow = dist > 0.0f ? HALO / (1.0f + 4.0f * dist * dist) : HALO;
       if (cover <= 0.0f && glow < 0.03f) {
@@ -214,7 +240,7 @@ void renderWave(uint32_t ms) {
         continue;
       }
 
-      float s = (r - col.yCentre) / col.halfW;  // -1..1 across the ribbon
+      float s = (r - col.yCentre) / halfW;  // -1..1 across the ribbon
 
       // Mesh: lines along the ribbon (fade out when seen edge-on, where they would
       // squash together) crossed by lines that travel with the wave. Dots where they meet.
@@ -229,7 +255,7 @@ void renderWave(uint32_t ms) {
       float light = 0.5f + 0.3f * depth + 0.15f * (1.0f - faceOn) + 0.2f * col.crest;
       // Everything above is "how bright it looks". LEDs are linear, so convert
       // (gamma 2.2) - this keeps fades smooth and lets the mesh gaps go dark.
-      float look = clamp01(cover * mesh * light + glow);
+      float look = clamp01(cover * mesh * light * col.shimmer + glow);
       float level = look * look * sqrtf(sqrtf(look)) * (MAX_BRIGHTNESS / 255.0f);  // ~look^2.25
 
       // Front face (cos > 0) = Lilac, back face (cos < 0) = Blush

@@ -29,6 +29,7 @@ row 1 runs right→left, row 2 left→right, and so on, ending at the left end o
    - `SWELL_AMPLITUDE`, `CHOP_AMPLITUDE`, `CREST_SHARPNESS`: wave height and shape
    - `RIBBON_HALF_W`, `RIBBON_MIN_W`, `EDGE_SOFTNESS`, `HALO`: ribbon thickness and edges
    - `MESH_STRENGTH`, `MESH_SPACING`: how visible the dotted mesh is (0 = solid ribbon)
+   - `ORGANIC`: how alive the water feels (0 = perfectly regular, 1 = default, ~1.5 = rougher)
 4. Upload.
 
 **Wiring check:** uncomment `#define WIRING_TEST`. You should see LED #0 blue at the
