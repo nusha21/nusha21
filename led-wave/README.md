@@ -1,12 +1,17 @@
 # Air Wave – ESP32 LED panel
 
-A 3D ribbon animation for a 694-LED oval WS2812B panel. The ribbon floats across the
-panel with pointed ends. Bulges appear at random places, swell up, drift left → right
-and fade away. It twists, is drawn in perspective and is lit by a virtual light, so it
-reads as 3D. The front face uses the first colour of the theme and the back face the last.
+3D ribbon animations for a 694-LED oval WS2812B panel, with two patterns:
 
-`preview.mp4` shows a render of the sketch's actual output (auto mode, 24 s).
-`previews/` holds the design options that led here.
+- **Silk** (default): a see-through sheet of silk with one glowing edge that folds
+  gently, with occasional random swells rising through it. Colours run along its length:
+  the left tip is the theme's first colour and the right tip its last.
+  Preview: `previews/silk-wave-preview-medium.mp4`.
+- **Bulges**: a lit, solid ribbon. Bulges appear at random places, swell up, drift
+  left → right and fade away. The front face is the first colour, the back face the last.
+  Preview: `preview.mp4`.
+
+Type `p` in the Serial Monitor to switch patterns. `previews/` also holds the design
+options that led here.
 
 ## Colour themes
 
@@ -22,8 +27,9 @@ Control it from the **Serial Monitor at 115200 baud**:
 | `3` | PM2.5 | Apricot → Burnt orange (`#DC8E65` … `#D3613D`) |
 | `4` | CO2 | Amber → Honey (`#EDB45E` … `#F0C765`) |
 | `a` | Auto | back to changing every 5 s |
+| `p` | — | switch pattern (Silk ↔ Bulges) |
 
-Picking `1`–`4` holds that colour until you type `a`.
+Picking `1`–`4` holds that colour until you type `a`. Colours work in both patterns.
 
 ## Panel
 
@@ -43,6 +49,12 @@ row 1 runs right→left, row 2 left→right, and so on, ending at the left end o
    - `MAX_BRIGHTNESS`: 0–255 (default 90)
    - `MAX_MILLIAMPS`: keep this below your 5 V supply's rating (default 4000 mA)
    - `THEME_HOLD_MS`, `THEME_FADE_MS`: time on each colour and cross-fade time
+   - `START_PATTERN`: 0 = Silk, 1 = Bulges at power-on
+   - Silk: `SILK_WIDTH` (thickness), `SILK_START`/`SILK_LENGTH` (tips), `SILK_WAVE`
+     (wave height), `SILK_WAVE_MS`/`SILK_CROSS_MS`/`SILK_RIPPLE_MS` (speed),
+     `SILK_EDGE` (edge-line brightness), `SILK_BODY` (how visible the faint side is),
+     `SILK_GLOW` (overall brightness), `SILK_SWELL_*` (random swells)
+   - Bulges: `BULGE_GLOW` (brightness) and the settings below
    - `RIBBON_START`, `RIBBON_LENGTH`: where the ribbon's tips are (the rest stays dark)
    - `RIBBON_WIDTH`, `RIBBON_THIN`: bulge size and thickness between bulges
    - `BULGE_EVERY_MS`, `BULGE_LIFE_*`, `BULGE_SIZE_*`, `BULGE_SPEED_*`: how often bulges

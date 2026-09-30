@@ -11,13 +11,16 @@
  *   Data enters at the RIGHT end of the TOP row (LED #0).
  *   Row 1 runs right -> left, row 2 left -> right, row 3 right -> left, ...
  *
- * Animation:
- *   A 3D ribbon with pointed ends floats across the panel. Bulges appear at
- *   random places, swell up, drift left -> right and fade away. The ribbon
- *   twists, is drawn in perspective and is lit by a light, so it looks 3D.
- *   Front face = first colour of the theme, back face = last colour.
+ * Patterns (both are a 3D ribbon drawn in perspective, with pointed ends):
+ *   Silk   - a see-through sheet of silk with one glowing edge, folding
+ *            gently; occasional random swells rise through it. Colours run
+ *            along its length (left tip = first colour, right tip = last).
+ *   Bulges - a lit, solid ribbon. Bulges appear at random places, swell up,
+ *            drift left -> right and fade away. Front face = first colour,
+ *            back face = last colour.
  *
- * Colour themes (Serial Monitor, 115200 baud):
+ * Serial Monitor (115200 baud):
+ *   p = switch pattern (Silk <-> Bulges)
  *   1 = Humidity     (Lilac -> Blush)
  *   2 = Temperature  (Sky -> Periwinkle)
  *   3 = PM2.5        (Apricot -> Burnt orange)
@@ -43,6 +46,27 @@
 const uint32_t THEME_HOLD_MS  = 5000;  // auto mode: time on each colour theme
 const uint32_t THEME_FADE_MS  = 1000;  // cross-fade time between themes
 
+// Pattern shown at start-up: 0 = Silk, 1 = Bulges ('p' switches)
+#define START_PATTERN   0
+const uint32_t PATTERN_FADE_MS = 600;  // fade-in after switching pattern
+
+// ---- Silk pattern ----
+const float SILK_START      = 1.0f;    // LED column of the left tip
+const float SILK_LENGTH     = 47.0f;   // length in LEDs
+const float SILK_WIDTH      = 7.0f;    // half-width of the sheet (rows) - bigger = wider silk
+const float SILK_WAVE       = 1.3f;    // height of the main up/down wave (rows)
+const uint32_t SILK_WAVE_MS   = 7000;  // main wave (left -> right), lower = faster
+const uint32_t SILK_CROSS_MS  = 11000; // second wave going the other way (changing folds)
+const uint32_t SILK_RIPPLE_MS = 5300;  // small ripple that twists the sheet
+const float SILK_EDGE       = 2.2f;    // brightness of the glowing edge line
+const float SILK_BODY       = 0.15f;   // brightness of the faint side of the sheet (0..1)
+const float SILK_GLOW       = 3.2f;    // overall brightness of the silk
+const float SILK_TILT       = 0.35f;   // radians we look down onto the sheet
+const uint32_t SILK_SWELL_EVERY_MS = 2600;  // random swells in the silk, on average this often
+const float SILK_SWELL_LIFT = 2.0f;    // how far swells rise / dip (rows)
+const float SILK_SWELL_POP  = 3.0f;    // how far swells come toward you
+
+// ---- Bulges pattern ----
 // Ribbon shape
 const float RIBBON_START    = 2.0f;   // LED column where the ribbon's left tip is
 const float RIBBON_LENGTH   = 45.0f;  // length in LEDs (panel is 50 wide, so the ends stay dark)
@@ -68,7 +92,10 @@ const float SWELL_HEIGHT    = 1.1f;    // rows
 // 3D look
 const float CAMERA_DIST     = 38.0f;   // lower = stronger perspective
 const float CAMERA_TILT     = 0.31f;   // radians we look down onto the ribbon (~18 degrees)
-const float GLOW            = 1.1f;    // overall density / brightness of the surface
+const float BULGE_GLOW      = 5.5f;    // overall brightness of the bulge ribbon
+
+// Both patterns
+const float GLOW            = 1.1f;    // how quickly dense / folded areas saturate
 
 // ---------------------------------------------------------------------------
 // PANEL GEOMETRY
@@ -110,6 +137,12 @@ uint8_t  themePrev = 0;       // theme we are fading from
 uint32_t themeChangedAt = 0;  // millis() of the last change
 bool     autoCycle = true;
 
+// Pattern state
+const uint8_t PATTERN_SILK = 0, PATTERN_BULGES = 1;
+const char *PATTERN_NAME[2] = {"Silk", "Bulges"};
+uint8_t  pattern = START_PATTERN;
+uint32_t patternChangedAt = 0;
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // 3D RIBBON DATA
@@ -121,7 +154,8 @@ bool     autoCycle = true;
 // half-LED grid, adding light. Folds and edge-on parts pile up more surface
 // per LED, so they glow brighter - that is what makes it read as 3D.
 const uint16_t NUM_SLICES   = 160;
-const uint8_t  SLICE_POINTS = 20;
+const uint8_t  SLICE_POINTS_SILK   = 26;  // points across the ribbon
+const uint8_t  SLICE_POINTS_BULGES = 20;
 
 struct Slice {
   float x, y, z;     // centre line
@@ -195,9 +229,10 @@ void setTheme(uint8_t theme, uint32_t ms) {
 
 void printHelp() {
   Serial.println();
-  Serial.println(F("Air Wave colour control:"));
+  Serial.println(F("Air Wave control:"));
   Serial.println(F("  1 = Humidity   2 = Temperature   3 = PM2.5   4 = CO2"));
-  Serial.println(F("  a = auto (change every 5 s)"));
+  Serial.println(F("  a = auto colours (change every 5 s)"));
+  Serial.println(F("  p = switch pattern (Silk <-> Bulges)"));
 }
 
 void handleSerial(uint32_t ms) {
@@ -209,6 +244,11 @@ void handleSerial(uint32_t ms) {
       Serial.print(F("Colour: "));
       Serial.print(THEME_NAME[themeNow]);
       Serial.println(F("  (type a for auto)"));
+    } else if (c == 'p' || c == 'P') {
+      pattern = (pattern == PATTERN_SILK) ? PATTERN_BULGES : PATTERN_SILK;
+      patternChangedAt = ms;
+      Serial.print(F("Pattern: "));
+      Serial.println(PATTERN_NAME[pattern]);
     } else if (c == 'a' || c == 'A') {
       autoCycle = true;
       themeChangedAt = ms;  // hold the current colour for a full 5 s first
@@ -230,18 +270,18 @@ void updateTheme(uint32_t ms) {
 // ---------------------------------------------------------------------------
 // 3D RIBBON
 // ---------------------------------------------------------------------------
-// Find the bulges alive at time ms.
-uint8_t activeBulges(uint32_t ms, Bulge *out) {
+// Find the bulges alive at time ms. A new one starts about every everyMs.
+uint8_t activeBulges(uint32_t ms, uint32_t everyMs, Bulge *out) {
   uint8_t n = 0;
-  uint32_t kNow = ms / BULGE_EVERY_MS;
-  uint32_t lookBack = (uint32_t)(BULGE_LIFE_MAX * 1000.0f / BULGE_EVERY_MS) + 2;
+  uint32_t kNow = ms / everyMs;
+  uint32_t lookBack = (uint32_t)(BULGE_LIFE_MAX * 1000.0f / everyMs) + 2;
 
   for (uint32_t i = 0; i <= lookBack && n < MAX_BULGES; i++) {
     if (kNow < i) break;
     uint32_t k = kNow - i;
     // age in seconds, from integer ms so it stays precise
-    float age = (int32_t)(ms - k * BULGE_EVERY_MS) / 1000.0f
-              - 0.8f * rnd(k, 0) * (BULGE_EVERY_MS / 1000.0f);
+    float age = (int32_t)(ms - k * everyMs) / 1000.0f
+              - 0.8f * rnd(k, 0) * (everyMs / 1000.0f);
     float life = BULGE_LIFE_MIN + (BULGE_LIFE_MAX - BULGE_LIFE_MIN) * rnd(k, 1);
     if (age <= 0.0f || age >= life) continue;
 
@@ -259,28 +299,70 @@ uint8_t activeBulges(uint32_t ms, Bulge *out) {
   return n;
 }
 
-void computeSlices(uint32_t ms) {
+// Sum the bulges at position u along the ribbon.
+static void bulgesAt(float u, const Bulge *bulges, uint8_t numBulges, float &size, float &lift) {
+  size = 0.0f; lift = 0.0f;
+  for (uint8_t b = 0; b < numBulges; b++) {
+    float d = (u - bulges[b].pos) / bulges[b].sigma;
+    if (d > 3.0f || d < -3.0f) continue;
+    float g = bulges[b].amount * expf(-d * d);
+    size += g;
+    lift += bulges[b].sign * g;
+  }
+  if (size > 1.3f) size = 1.3f;
+}
+
+// Silk: a wide sheet folding gently. Two waves travel in opposite directions
+// so the folds keep changing, and random swells rise through it.
+void computeSilkSlices(uint32_t ms) {
+  const float TWO_PI_F = 6.2831853f;
+  const float wavePh   = phase(ms, SILK_WAVE_MS);
+  const float crossPh  = phase(ms, SILK_CROSS_MS);
+  const float ripplePh = phase(ms, SILK_RIPPLE_MS);
+  const float cosTilt = cosf(SILK_TILT), sinTilt = sinf(SILK_TILT);
+
+  Bulge bulges[MAX_BULGES];
+  uint8_t numBulges = activeBulges(ms, SILK_SWELL_EVERY_MS, bulges);
+
+  for (uint16_t i = 0; i < NUM_SLICES; i++) {
+    float u = (float)i / (NUM_SLICES - 1);  // 0 = left tip, 1 = right tip
+    float size, lift;
+    bulgesAt(u, bulges, numBulges, size, lift);
+
+    float taper = powf(sinf(3.14159265f * u), 0.7f);   // narrow at both tips
+    float ph1 = TWO_PI_F * (1.2f * u - wavePh);         // travels left -> right
+    float ph2 = TWO_PI_F * (0.7f * u + crossPh);        // travels right -> left
+    float ph3 = TWO_PI_F * (2.1f * u - ripplePh);
+
+    Slice &s = slices[i];
+    s.x = SILK_START + u * SILK_LENGTH;
+    s.y = SILK_WAVE * sinf(ph1) + 0.6f * sinf(ph2) + SILK_SWELL_LIFT * lift;
+    s.z = 2.5f * cosf(ph1) + SILK_SWELL_POP * size;
+
+    // The sheet lies mostly flat (going into the panel) and tips toward you;
+    // where it turns edge-on it folds into a bright line.
+    float theta = 0.9f + 0.8f * sinf(ph2) + 0.5f * sinf(ph3) + 0.8f * lift;
+    float halfW = SILK_WIDTH * taper * (0.7f + 0.5f * size);
+    float cy = halfW * sinf(theta), cz = halfW * cosf(theta);
+    s.ay = cy * cosTilt - cz * sinTilt;
+    s.az = cy * sinTilt + cz * cosTilt;
+  }
+}
+
+// Bulges: a solid ribbon with random bulges that swell, drift and fade.
+void computeBulgeSlices(uint32_t ms) {
   const float TWO_PI_F = 6.2831853f;
   const float swellPh = phase(ms, SWELL_PERIOD_MS);
   const float rollPh  = phase(ms, ROLL_PERIOD_MS);
   const float cosTilt = cosf(CAMERA_TILT), sinTilt = sinf(CAMERA_TILT);
 
   Bulge bulges[MAX_BULGES];
-  uint8_t numBulges = activeBulges(ms, bulges);
+  uint8_t numBulges = activeBulges(ms, BULGE_EVERY_MS, bulges);
 
   for (uint16_t i = 0; i < NUM_SLICES; i++) {
     float u = (float)i / (NUM_SLICES - 1);  // 0 = left tip, 1 = right tip
-
-    // Sum of the bulges at this point along the ribbon
-    float size = 0.0f, lift = 0.0f;
-    for (uint8_t b = 0; b < numBulges; b++) {
-      float d = (u - bulges[b].pos) / bulges[b].sigma;
-      if (d > 3.0f || d < -3.0f) continue;
-      float g = bulges[b].amount * expf(-d * d);
-      size += g;
-      lift += bulges[b].sign * g;
-    }
-    if (size > 1.3f) size = 1.3f;
+    float size, lift;
+    bulgesAt(u, bulges, numBulges, size, lift);
 
     float taper = smoothstep(0.0f, 0.1f, u) * (1.0f - smoothstep(0.88f, 1.0f, u));  // pointed tips
     float ph = TWO_PI_F * (1.1f * u - swellPh);  // gentle swell travelling left -> right
@@ -322,7 +404,9 @@ void renderRibbon() {
   // Light comes from the upper left, in front
   const float LX = -0.3546f, LY = -0.6079f, LZ = -0.7296f;
   const float CX = (MAX_ROW_LEN - 1) * 0.5f, CY = (NUM_ROWS - 1) * 0.5f;
-  const float vStep = 2.0f / (SLICE_POINTS - 1);
+  const bool silk = (pattern == PATTERN_SILK);
+  const uint8_t points = silk ? SLICE_POINTS_SILK : SLICE_POINTS_BULGES;
+  const float vStep = 2.0f / (points - 1);
 
   memset(glowGrid, 0, sizeof(glowGrid));
   memset(colorGrid, 0, sizeof(colorGrid));
@@ -333,7 +417,9 @@ void renderRibbon() {
     const Slice &p = slices[i > 0 ? i - 1 : i];
     float span = (i > 0 && i < NUM_SLICES - 1) ? 0.5f : 1.0f;
 
-    for (uint8_t j = 0; j < SLICE_POINTS; j++) {
+    float u = (float)i / (NUM_SLICES - 1);
+
+    for (uint8_t j = 0; j < points; j++) {
       float v = -1.0f + j * vStep;
 
       float X = s.x, Y = s.y + v * s.ay, Z = s.z + v * s.az;
@@ -352,22 +438,35 @@ void renderRibbon() {
       if (area < 1e-6f) continue;
       nx /= area; ny /= area; nz /= area;
 
-      // Lighting: diffuse + a glossy highlight
-      float ndl = fabsf(nx * LX + ny * LY + nz * LZ);
-      float n2 = ndl * ndl, n4 = n2 * n2, n8 = n4 * n4;
-      float spec = n8 * n4;  // ndl^12
-      float depth = clamp01(0.5f - 0.5f * Z / 9.0f);  // 1 = near, 0 = far
-      float light = (0.2f + 0.8f * ndl + 0.6f * spec) * (0.35f + 0.65f * depth);
-
-      // Front face (normal toward the camera) = first colour, back = last colour
-      float colorPos = (nz < 0.0f ? 0.0f : 0.85f) + 0.15f * (1.0f - depth);
+      float light, colorPos;
+      if (silk) {
+        // See-through silk: one glowing edge (v = +1), the body fading away
+        // from it, brighter where the sheet turns edge-on to you.
+        float e = (v + 1.0f) * 0.5f;
+        float body = SILK_BODY + (1.0f - SILK_BODY) * e * e;
+        float r = (1.0f - v) / 0.12f;
+        float edge = SILK_EDGE * expf(-r * r);
+        float edgeOn = 0.3f + 0.7f * (1.0f - fabsf(nz));
+        float tips = smoothstep(0.0f, 0.12f, u) * (1.0f - smoothstep(0.88f, 1.0f, u));
+        light = (body + edge) * edgeOn * tips * SILK_GLOW;
+        colorPos = u;  // colours run along the length
+      } else {
+        // Solid ribbon: diffuse + a glossy highlight
+        float ndl = fabsf(nx * LX + ny * LY + nz * LZ);
+        float n2 = ndl * ndl, n4 = n2 * n2, n8 = n4 * n4;
+        float spec = n8 * n4;  // ndl^12
+        float depth = clamp01(0.5f - 0.5f * Z / 9.0f);  // 1 = near, 0 = far
+        light = (0.2f + 0.8f * ndl + 0.6f * spec) * (0.35f + 0.65f * depth) * BULGE_GLOW;
+        // Front face (normal toward the camera) = first colour, back = last colour
+        colorPos = (nz < 0.0f ? 0.0f : 0.85f) + 0.15f * (1.0f - depth);
+      }
 
       // Perspective projection
       float f = CAMERA_DIST / (CAMERA_DIST + Z);
       float sx = CX + (X - CX) * f;
       float sy = CY + Y * f;
 
-      splat(sx * 2.0f, sy, light * area * 5.5f, colorPos);
+      splat(sx * 2.0f, sy, light * area, colorPos);
     }
   }
 }
@@ -389,10 +488,12 @@ void limitPower(uint32_t totalLevel) {
 }
 
 void renderFrame(uint32_t ms) {
-  computeSlices(ms);
+  if (pattern == PATTERN_SILK) computeSilkSlices(ms);
+  else                         computeBulgeSlices(ms);
   renderRibbon();
 
   float fade = clamp01((float)(ms - themeChangedAt) / THEME_FADE_MS);
+  float patternFade = smoothstep(0.0f, 1.0f, (float)(ms - patternChangedAt) / PATTERN_FADE_MS);
   uint32_t totalLevel = 0;
 
   for (uint8_t r = 0; r < NUM_ROWS; r++) {
@@ -412,7 +513,7 @@ void renderFrame(uint32_t ms) {
       float colorPos = glow > 1e-6f ? col / glow : 0.0f;
 
       // "look" is perceived brightness; LEDs are linear, so convert (~gamma 2.25)
-      float level = look * look * sqrtf(sqrtf(look)) * (MAX_BRIGHTNESS / 255.0f);
+      float level = look * look * sqrtf(sqrtf(look)) * patternFade * (MAX_BRIGHTNESS / 255.0f);
       if (level * 255.0f < 5.0f) {  // too dim to hold its colour
         strip.setPixelColor(idx, 0);
         continue;
@@ -466,7 +567,10 @@ void setup() {
   strip.show();
 
   themeChangedAt = millis();
+  patternChangedAt = millis();
   printHelp();
+  Serial.print(F("Pattern: "));
+  Serial.println(PATTERN_NAME[pattern]);
   Serial.print(F("Colour: "));
   Serial.println(THEME_NAME[themeNow]);
 }
