@@ -53,6 +53,20 @@ Settings at the top of the file: `DATA_PIN`, `MAX_BRIGHTNESS`, `MAX_MILLIAMPS`,
 `BORDER_LEDS`, `FILL_TIME_MS`, `BORDER_LEVEL`/`BORDER_SHIMMER`, `CENTRE_LEVEL`/
 `CENTRE_RIPPLE`, `WAVE_EDGE_GLOW`, `SPOTLIGHT_DIM`.
 
+## Air Show (`air_show/air_show.ino`)
+
+A looping show with a smooth 1 s cross-fade between steps:
+
+| Step | Time | Shows |
+|------|------|-------|
+| 1 | 20 s | Dotted 3D wave (hump rising in the centre); colour changes every 5 s: Humidity → Temperature → PM2.5 → CO2 |
+| 2 | 10 s | Four Fields: Temperature / Humidity / PM2.5 / CO2 columns filling with a wave |
+| 3 | 8 s | Dotted wave in dark orange → light orange |
+
+Serial Monitor (115200 baud): `1` / `2` / `3` hold that step, `a` restarts the whole show.
+Timing is set by `STEP_MS`, `CROSSFADE_MS` and `WAVE_COLOUR_MS` at the top of the file.
+`air_show/preview.mp4` shows the sketch's actual output.
+
 ## Panel
 
 | Row | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
