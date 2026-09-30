@@ -75,6 +75,16 @@ with 2 s cross-fades and 2 s colour fades. Motion is about 1.5–2× slower, wit
 mesh lines, gentler small waves and rounder crests. Serial Monitor: `1` holds the swell
 wave, `2` holds Four Fields, `a` restarts the show. `swell_show/preview.mp4` shows its output.
 
+## Flow Wave (`flow_wave/flow_wave.ino`)
+
+A thick, soft band of light, with a bright core and a wide dim glow, gently waving
+left → right, with brighter patches drifting along it. The colour flows continuously
+through the sensor palettes, with each new colour arriving from the right:
+CO2 gold → PM2.5 orange/peach → Humidity pink/lilac → Temperature sky/periwinkle,
+about 14 s per full cycle. Serial Monitor: `1`–`4` hold Humidity / Temperature / PM2.5 /
+CO2 (with a smooth fade), and `a` lets the colours flow again. `flow_wave/preview.mp4`
+shows its output, and `compare-with-reference.png` compares it with the reference video.
+
 ## Panel
 
 | Row | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 |
