@@ -34,9 +34,10 @@ const char DEVICE_ID[] = "breethr-esp32";
 #define RELAY_PIN 32
 
 #define LED_TYPE WS2812B
-// This 694-LED panel is wired for RGB byte order. Using GRB swaps the red and
-// green channels and makes the supplied yellows/oranges appear green.
-#define COLOR_ORDER RGB
+// WS2812B LEDs normally use GRB byte order. With RGB the red and green
+// channels swap and Apricot/oranges show up GREEN. If colours look wrong,
+// try the other value: GRB <-> RGB.
+#define COLOR_ORDER GRB
 
 // ================= ORIGINAL SENSOR LIMITS =================
 #define Lower_Limit_CO2_SCD      400
@@ -82,17 +83,29 @@ static constexpr uint16_t MAIN_FRAME_MS = 33;
 static constexpr uint16_t WAVE_A_PERIOD_MS = 9900;  // Lower = faster.
 static constexpr uint16_t WAVE_B_PERIOD_MS = 12300; // Lower = faster.
 //
-// Part 1 - Outdoor HIGH (Apricot).
-static constexpr uint32_t APRICOT_REVEAL_MS = 6000;  // Apricot slides in from the left.
-static constexpr uint32_t APRICOT_TOTAL_MS = 20000;  // Total Apricot time (includes reveal).
-//                                                     Raise this to delay the Lilac.
-// Part 2 - Outdoor LOW (Lilac).
-static constexpr uint32_t LILAC_TAKEOVER_MS = 14000; // Lilac pushes in from the right.
-static constexpr uint32_t LILAC_HOLD_MS = 4000;      // Full Lilac before Temperature starts.
+// Every step below starts from a BLACK screen and the wave fills in from the
+// left, except Lilac which fills in from the right over the Apricot.
 //
-// Part 3 - Indoor: Temperature -> Humidity -> PM 2.5 -> CO2.
-static constexpr uint32_t INDOOR_SWEEP_MS = 3000;    // New colour slides in from the left.
-static constexpr uint32_t INDOOR_PARAM_MS = 8000;    // Time per parameter (includes sweep).
+// 1) Outdoor HIGH - Apricot.
+static constexpr uint32_t APRICOT_FILL_MS = 10000;   // Apricot fills in from the left.
+static constexpr uint32_t APRICOT_HOLD_MS = 0;       // Extra time on full Apricot.
+//
+// 2) Outdoor LOW - Lilac.
+static constexpr uint32_t LILAC_FILL_MS = 10000;     // Lilac pushes in from the right.
+static constexpr uint32_t LILAC_HOLD_MS = 10000;     // Hold full Lilac.
+//
+// 3) Black screen between outdoor and indoor.
+static constexpr uint32_t BLACK_FADE_MS = 2000;      // Lilac fades out to black.
+static constexpr uint32_t BLACK_HOLD_MS = 2000;      // Stay black.
+//
+// 4) Indoor: Temperature -> Humidity -> PM 2.5 -> CO2.
+//    Temperature fills in from black; each next colour flows in over the last.
+static constexpr uint32_t INDOOR_FILL_MS = 10000;    // Each colour fills in from the left.
+static constexpr uint32_t INDOOR_HOLD_MS = 0;        // Extra time on each full colour.
+//
+// 5) Black screen after CO2, before Apricot starts again.
+static constexpr uint32_t END_FADE_MS = 2000;        // CO2 fades out to black.
+static constexpr uint32_t END_BLACK_MS = 2000;       // Stay black.
 //
 // Softness of the edge between two colours (0.05 = sharp, 0.25 = very soft).
 static constexpr float COLOR_EDGE = 0.12f;
@@ -149,9 +162,13 @@ static constexpr uint32_t INDOOR_RIGHT[NUM_INDOOR] = {
   0xF0C765  // CO2:         Honey
 };
 
+static constexpr uint32_t INDOOR_PARAM_MS = INDOOR_FILL_MS + INDOOR_HOLD_MS;
 static constexpr uint32_t ANIMATION_CYCLE_MS =
-  APRICOT_TOTAL_MS + LILAC_TAKEOVER_MS + LILAC_HOLD_MS +
-  NUM_INDOOR * INDOOR_PARAM_MS;
+  APRICOT_FILL_MS + APRICOT_HOLD_MS +
+  LILAC_FILL_MS + LILAC_HOLD_MS +
+  BLACK_FADE_MS + BLACK_HOLD_MS +
+  NUM_INDOOR * INDOOR_PARAM_MS +
+  END_FADE_MS + END_BLACK_MS;
 
 // A "paint" is a colour that may fade from left to right across the panel.
 struct Paint {
@@ -159,13 +176,19 @@ struct Paint {
   uint32_t right;
 };
 
-// One frame of the colour sequence: `top` covers `base` by `cover` (0..1).
-// The covered part starts at the left edge, or at the right edge if fromRight.
+// How the `top` paint replaces the `base` paint.
+enum Motion : uint8_t {
+  FROM_LEFT,  // edge travels left -> right
+  FROM_RIGHT, // edge travels right -> left
+  FADE        // whole panel cross-fades at once
+};
+
+// One frame of the colour sequence: `top` covers `base` as progress goes 0..1.
 struct Scene {
   Paint base;
   Paint top;
   float progress;
-  bool fromRight;
+  Motion motion;
 };
 
 float curveA[GRID_X2];
@@ -317,37 +340,50 @@ static CRGB paintAt(const Paint &paint, float x) {
   return mixColor(colorFromHex(paint.left), colorFromHex(paint.right), x);
 }
 
+static float progressOf(uint32_t t, uint32_t duration) {
+  return duration == 0 ? 1.0f : clamp01(float(t) / duration);
+}
+
 static Scene sceneAt(uint32_t now) {
-  const uint32_t elapsed = now - animationStartMs;
-  const bool firstCycle = elapsed < ANIMATION_CYCLE_MS;
-  uint32_t t = elapsed % ANIMATION_CYCLE_MS;
+  uint32_t t = (now - animationStartMs) % ANIMATION_CYCLE_MS;
 
-  // Part 1: Apricot slides in from the left (from dark on power-up,
-  // over the previous CO2 colour on every later cycle).
-  if (t < APRICOT_TOTAL_MS) {
-    const Paint before = firstCycle ? BLACK_PAINT : indoorPaint(NUM_INDOOR - 1);
-    return {before, APRICOT_PAINT, clamp01(float(t) / APRICOT_REVEAL_MS), false};
+  // 1) Apricot fills in from the left, starting from black.
+  if (t < APRICOT_FILL_MS + APRICOT_HOLD_MS) {
+    return {BLACK_PAINT, APRICOT_PAINT, progressOf(t, APRICOT_FILL_MS), FROM_LEFT};
   }
-  t -= APRICOT_TOTAL_MS;
+  t -= APRICOT_FILL_MS + APRICOT_HOLD_MS;
 
-  // Part 2: Lilac pushes in from the right, then holds.
-  if (t < LILAC_TAKEOVER_MS + LILAC_HOLD_MS) {
-    return {APRICOT_PAINT, LILAC_PAINT,
-            clamp01(float(t) / LILAC_TAKEOVER_MS), true};
+  // 2) Lilac pushes in from the right over the Apricot, then holds.
+  if (t < LILAC_FILL_MS + LILAC_HOLD_MS) {
+    return {APRICOT_PAINT, LILAC_PAINT, progressOf(t, LILAC_FILL_MS), FROM_RIGHT};
   }
-  t -= LILAC_TAKEOVER_MS + LILAC_HOLD_MS;
+  t -= LILAC_FILL_MS + LILAC_HOLD_MS;
 
-  // Part 3: each indoor parameter slides in from the left.
-  const uint8_t i = t / INDOOR_PARAM_MS;
-  const uint32_t tp = t % INDOOR_PARAM_MS;
-  const Paint before = (i == 0) ? LILAC_PAINT : indoorPaint(i - 1);
-  return {before, indoorPaint(i), clamp01(float(tp) / INDOOR_SWEEP_MS), false};
+  // 3) Fade to a black screen.
+  if (t < BLACK_FADE_MS + BLACK_HOLD_MS) {
+    return {LILAC_PAINT, BLACK_PAINT, progressOf(t, BLACK_FADE_MS), FADE};
+  }
+  t -= BLACK_FADE_MS + BLACK_HOLD_MS;
+
+  // 4) Indoor colours: Temperature fills in from black, then each next
+  //    colour flows in from the left over the previous one.
+  if (t < NUM_INDOOR * INDOOR_PARAM_MS) {
+    const uint8_t i = t / INDOOR_PARAM_MS;
+    const uint32_t tp = t % INDOOR_PARAM_MS;
+    const Paint before = (i == 0) ? BLACK_PAINT : indoorPaint(i - 1);
+    return {before, indoorPaint(i), progressOf(tp, INDOOR_FILL_MS), FROM_LEFT};
+  }
+  t -= NUM_INDOOR * INDOOR_PARAM_MS;
+
+  // 5) Fade to black before the cycle starts again with Apricot.
+  return {indoorPaint(NUM_INDOOR - 1), BLACK_PAINT, progressOf(t, END_FADE_MS), FADE};
 }
 
 // How much of the `top` paint covers position x (0 = left, 1 = right).
 static float coverAt(const Scene &scene, float x) {
+  if (scene.motion == FADE) return scene.progress;
   const float travel = 1.0f + 2.0f * COLOR_EDGE;
-  if (scene.fromRight) {
+  if (scene.motion == FROM_RIGHT) {
     const float front = 1.0f + COLOR_EDGE - travel * scene.progress;
     return smoothStep(front - COLOR_EDGE, front + COLOR_EDGE, x);
   }
