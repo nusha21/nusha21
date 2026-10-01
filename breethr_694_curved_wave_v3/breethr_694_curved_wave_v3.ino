@@ -87,11 +87,11 @@ static constexpr uint16_t WAVE_A_PERIOD_MS = 9900;  // Lower = faster.
 static constexpr uint16_t WAVE_B_PERIOD_MS = 12300; // Lower = faster.
 //
 // Every step below starts from a BLACK screen and the wave fills in from the
-// left, except Lilac which fills in from the right over the Apricot.
+// left, except Lilac which fills in from the right over the outdoor orange.
 //
-// 1) Outdoor HIGH - Apricot.
-static constexpr uint32_t APRICOT_FILL_MS = 10000;   // Apricot fills in from the left.
-static constexpr uint32_t APRICOT_HOLD_MS = 0;       // Extra time on full Apricot.
+// 1) Outdoor HIGH - Dark orange (setting names still say APRICOT).
+static constexpr uint32_t APRICOT_FILL_MS = 10000;   // Outdoor orange fills in from the left.
+static constexpr uint32_t APRICOT_HOLD_MS = 0;       // Extra time on full outdoor orange.
 //
 // 2) Outdoor LOW - Lilac.
 static constexpr uint32_t LILAC_FILL_MS = 10000;     // Lilac pushes in from the right.
@@ -106,7 +106,7 @@ static constexpr uint32_t BLACK_HOLD_MS = 2000;      // Stay black.
 static constexpr uint32_t INDOOR_FILL_MS = 10000;    // Each colour fills in from the left.
 static constexpr uint32_t INDOOR_HOLD_MS = 0;        // Extra time on each full colour.
 //
-// 5) Black screen after CO2, before Apricot starts again.
+// 5) Black screen after CO2, before outdoor orange starts again.
 static constexpr uint32_t END_FADE_MS = 2000;        // CO2 fades out to black.
 static constexpr uint32_t END_BLACK_MS = 2000;       // Stay black.
 //
@@ -350,13 +350,13 @@ static float progressOf(uint32_t t, uint32_t duration) {
 static Scene sceneAt(uint32_t now) {
   uint32_t t = (now - animationStartMs) % ANIMATION_CYCLE_MS;
 
-  // 1) Apricot fills in from the left, starting from black.
+  // 1) Outdoor orange fills in from the left, starting from black.
   if (t < APRICOT_FILL_MS + APRICOT_HOLD_MS) {
     return {BLACK_PAINT, APRICOT_PAINT, progressOf(t, APRICOT_FILL_MS), FROM_LEFT};
   }
   t -= APRICOT_FILL_MS + APRICOT_HOLD_MS;
 
-  // 2) Lilac pushes in from the right over the Apricot, then holds.
+  // 2) Lilac pushes in from the right over the outdoor orange, then holds.
   if (t < LILAC_FILL_MS + LILAC_HOLD_MS) {
     return {APRICOT_PAINT, LILAC_PAINT, progressOf(t, LILAC_FILL_MS), FROM_RIGHT};
   }
