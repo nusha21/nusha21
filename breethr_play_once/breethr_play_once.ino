@@ -399,114 +399,116 @@ uint32_t scanDoneMs = 0;
 bool scanRunning = false;
 
 // Breethr logomark, also used on the web app.
-static const char LOGO_SVG[] PROGMEM = R"SVG(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 430 728" fill="#073D4D" aria-label="Breethr"><g transform="translate(0,728) scale(0.1,-0.1)"><path d="M1420 7269 c-178 -15 -339 -71 -490 -170 -488 -320 -798 -1057 -895 -2129 -19 -206 -31 -749 -20 -904 l7 -109 69 133 c227 437 620 877 1114 1251 621 470 1358 779 1857 779 364 0 644 -184 738 -485 31 -99 31 -257 0 -380 -83 -331 -304 -681 -644 -1021 -134 -133 -299 -278 -333 -291 -6 -3 -51 18 -98 47 -333 196 -692 330 -1051 392 -170 29 -524 32 -676 5 -381 -67 -602 -237 -680 -526 -28 -101 -30 -315 -5 -411 81 -305 315 -485 712 -547 137 -21 423 -21 584 1 390 53 777 192 1157 416 l52 30 83 -67 c110 -88 321 -295 419 -408 388 -452 559 -892 474 -1219 -60 -229 -254 -412 -514 -483 -101 -28 -380 -25 -519 6 -940 203 -2219 1184 -2691 2063 l-48 90 -7 -97 c-10 -128 0 -756 14 -910 119 -1299 551 -2109 1215 -2279 257 -67 510 -36 712 85 176 106 356 320 465 554 20 41 36 64 44 61 35 -13 252 -56 337 -67 142 -17 438 -7 553 20 373 84 639 272 794 562 193 358 170 834 -63 1324 -170 356 -470 736 -784 989 -40 33 -71 62 -70 66 2 4 47 47 102 95 820 729 1151 1583 857 2211 -123 262 -347 468 -624 572 -174 65 -246 76 -492 76 -229 1 -329 -11 -535 -64 -41 -10 -76 -17 -78 -15 -3 2 -19 41 -38 86 -61 150 -187 328 -305 430 -218 191 -423 260 -699 238z m284 -443 c108 -53 221 -177 296 -326 25 -49 29 -65 19 -69 -35 -11 -386 -195 -489 -256 -341 -203 -634 -426 -867 -663 -59 -59 -103 -97 -103 -88 0 28 39 195 77 326 90 317 221 601 359 782 109 141 257 258 377 297 93 30 95 30 188 27 71 -2 96 -7 143 -30z m-88 -2925 c201 -37 417 -107 636 -207 48 -21 86 -43 85 -49 -5 -14 -278 -129 -417 -174 -376 -125 -793 -139 -1005 -34 -117 58 -168 149 -145 259 25 119 150 198 358 224 108 14 363 4 488 -19z m-772 -2260 c274 -235 600 -448 969 -634 97 -49 177 -93 177 -98 0 -6 -12 -33 -26 -62 -102 -201 -261 -339 -409 -353 -125 -12 -292 46 -415 145 -242 194 -451 596 -574 1104 -58 239 -65 228 60 102 60 -61 158 -153 218 -204z"/></g></svg>)SVG";
+// Kept as plain strings: the Arduino IDE misreads C++ raw strings in .ino files.
+static const char LOGO_SVG[] PROGMEM =
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 430 728\" fill=\"#073D4D\" aria-label=\"Breethr\"><g transform=\"translate(0,728) scale(0.1,-0.1)\"><path d=\"M1420 7269 c-178 -15 -339 -71 -490 -170 -488 -320 -798 -1057 -895 -2129 -19 -206 -31 -749 -20 -904 l7 -109 69 133 c227 437 620 877 1114 1251 621 470 1358 779 1857 779 364 0 644 -184 738 -485 31 -99 31 -257 0 -380 -83 -331 -304 -681 -644 -1021 -134 -133 -299 -278 -333 -291 -6 -3 -51 18 -98 47 -333 196 -692 330 -1051 392 -170 29 -524 32 -676 5 -381 -67 -602 -237 -680 -526 -28 -101 -30 -315 -5 -411 81 -305 315 -485 712 -547 137 -21 423 -21 584 1 390 53 777 192 1157 416 l52 30 83 -67 c110 -88 321 -295 419 -408 388 -452 559 -892 474 -1219 -60 -229 -254 -412 -514 -483 -101 -28 -380 -25 -519 6 -940 203 -2219 1184 -2691 2063 l-48 90 -7 -97 c-10 -128 0 -756 14 -910 119 -1299 551 -2109 1215 -2279 257 -67 510 -36 712 85 176 106 356 320 465 554 20 41 36 64 44 61 35 -13 252 -56 337 -67 142 -17 438 -7 553 20 373 84 639 272 794 562 193 358 170 834 -63 1324 -170 356 -470 736 -784 989 -40 33 -71 62 -70 66 2 4 47 47 102 95 820 729 1151 1583 857 2211 -123 262 -347 468 -624 572 -174 65 -246 76 -492 76 -229 1 -329 -11 -535 -64 -41 -10 -76 -17 -78 -15 -3 2 -19 41 -38 86 -61 150 -187 328 -305 430 -218 191 -423 260 -699 238z m284 -443 c108 -53 221 -177 296 -326 25 -49 29 -65 19 -69 -35 -11 -386 -195 -489 -256 -341 -203 -634 -426 -867 -663 -59 -59 -103 -97 -103 -88 0 28 39 195 77 326 90 317 221 601 359 782 109 141 257 258 377 297 93 30 95 30 188 27 71 -2 96 -7 143 -30z m-88 -2925 c201 -37 417 -107 636 -207 48 -21 86 -43 85 -49 -5 -14 -278 -129 -417 -174 -376 -125 -793 -139 -1005 -34 -117 58 -168 149 -145 259 25 119 150 198 358 224 108 14 363 4 488 -19z m-772 -2260 c274 -235 600 -448 969 -634 97 -49 177 -93 177 -98 0 -6 -12 -33 -26 -62 -102 -201 -261 -339 -409 -353 -125 -12 -292 46 -415 145 -242 194 -451 596 -574 1104 -58 239 -65 228 60 102 60 -61 158 -153 218 -204z\"/></g></svg>";
 
-static const char PORTAL_HTML_HEAD[] PROGMEM = R"HTML(<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Breethr Wi-Fi setup</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#FDFAF7;color:#141414;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-main{max-width:420px;margin:0 auto;padding:32px 20px 40px}
-.logo{width:44px;margin:0 auto 18px}
-.logo svg{display:block;width:100%;height:auto}
-h1{font-size:22px;font-weight:600;text-align:center;margin:0 0 4px;color:#073D4D}
-.sub{text-align:center;color:#5c5c5c;margin:0 0 24px;font-size:14px}
-.card{background:#fff;border:1px solid #ece6dc;border-radius:16px;padding:18px}
-label{display:block;font-size:13px;font-weight:600;margin:0 0 6px;color:#073D4D}
-input{width:100%;font:inherit;padding:12px 14px;border:1px solid #d9d2c6;border-radius:10px;background:#FDFAF7;color:#141414}
-input:focus{outline:2px solid #5497A7;outline-offset:1px;border-color:#5497A7}
-.row{margin-bottom:14px}
-.nets{list-style:none;margin:0 0 16px;padding:0;max-height:220px;overflow:auto;border:1px solid #ece6dc;border-radius:10px}
-.nets li{display:flex;justify-content:space-between;gap:8px;padding:11px 14px;border-bottom:1px solid #f1ece4;cursor:pointer}
-.nets li:last-child{border-bottom:0}
-.nets li:hover,.nets li.sel{background:#F9F5EE}
-.nets .ssid{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.nets .meta{color:#7a7a7a;font-size:13px;white-space:nowrap}
-.muted{color:#7a7a7a;font-size:14px;padding:11px 14px}
-.pw{position:relative}
-.pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;color:#5497A7;font:inherit;font-size:13px;cursor:pointer;padding:6px}
-.go{width:100%;border:0;border-radius:999px;background:#073D4D;color:#FDFAF7;font:inherit;font-weight:600;padding:14px;cursor:pointer;margin-top:4px}
-.go:disabled{opacity:.55;cursor:default}
-.link{background:none;border:0;color:#5497A7;font:inherit;font-size:14px;cursor:pointer;padding:0;margin:0 0 12px}
-.msg{margin-top:16px;padding:12px 14px;border-radius:10px;font-size:14px;display:none}
-.msg.show{display:block}
-.msg.info{background:#D0F1F8;color:#073D4D}
-.msg.ok{background:#e4f1d6;color:#254835}
-.msg.err{background:#f8e1d2;color:#7a3a10}
-.foot{text-align:center;color:#9a9a9a;font-size:12px;margin-top:20px}
-</style></head><body><main>
-)HTML";
+static const char PORTAL_HTML_HEAD[] PROGMEM =
+  "<!doctype html>\n"
+  "<html lang=\"en\"><head><meta charset=\"utf-8\">\n"
+  "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+  "<title>Breethr Wi-Fi setup</title>\n"
+  "<style>\n"
+  "*{box-sizing:border-box}\n"
+  "body{margin:0;background:#FDFAF7;color:#141414;font:16px/1.45 -apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif}\n"
+  "main{max-width:420px;margin:0 auto;padding:32px 20px 40px}\n"
+  ".logo{width:44px;margin:0 auto 18px}\n"
+  ".logo svg{display:block;width:100%;height:auto}\n"
+  "h1{font-size:22px;font-weight:600;text-align:center;margin:0 0 4px;color:#073D4D}\n"
+  ".sub{text-align:center;color:#5c5c5c;margin:0 0 24px;font-size:14px}\n"
+  ".card{background:#fff;border:1px solid #ece6dc;border-radius:16px;padding:18px}\n"
+  "label{display:block;font-size:13px;font-weight:600;margin:0 0 6px;color:#073D4D}\n"
+  "input{width:100%;font:inherit;padding:12px 14px;border:1px solid #d9d2c6;border-radius:10px;background:#FDFAF7;color:#141414}\n"
+  "input:focus{outline:2px solid #5497A7;outline-offset:1px;border-color:#5497A7}\n"
+  ".row{margin-bottom:14px}\n"
+  ".nets{list-style:none;margin:0 0 16px;padding:0;max-height:220px;overflow:auto;border:1px solid #ece6dc;border-radius:10px}\n"
+  ".nets li{display:flex;justify-content:space-between;gap:8px;padding:11px 14px;border-bottom:1px solid #f1ece4;cursor:pointer}\n"
+  ".nets li:last-child{border-bottom:0}\n"
+  ".nets li:hover,.nets li.sel{background:#F9F5EE}\n"
+  ".nets .ssid{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n"
+  ".nets .meta{color:#7a7a7a;font-size:13px;white-space:nowrap}\n"
+  ".muted{color:#7a7a7a;font-size:14px;padding:11px 14px}\n"
+  ".pw{position:relative}\n"
+  ".pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;color:#5497A7;font:inherit;font-size:13px;cursor:pointer;padding:6px}\n"
+  ".go{width:100%;border:0;border-radius:999px;background:#073D4D;color:#FDFAF7;font:inherit;font-weight:600;padding:14px;cursor:pointer;margin-top:4px}\n"
+  ".go:disabled{opacity:.55;cursor:default}\n"
+  ".link{background:none;border:0;color:#5497A7;font:inherit;font-size:14px;cursor:pointer;padding:0;margin:0 0 12px}\n"
+  ".msg{margin-top:16px;padding:12px 14px;border-radius:10px;font-size:14px;display:none}\n"
+  ".msg.show{display:block}\n"
+  ".msg.info{background:#D0F1F8;color:#073D4D}\n"
+  ".msg.ok{background:#e4f1d6;color:#254835}\n"
+  ".msg.err{background:#f8e1d2;color:#7a3a10}\n"
+  ".foot{text-align:center;color:#9a9a9a;font-size:12px;margin-top:20px}\n"
+  "</style></head><body><main>\n";
 
-static const char PORTAL_HTML_BODY[] PROGMEM = R"HTML(
-<h1>Connect your Breethr</h1>
-<p class="sub">Choose the Wi-Fi network this panel should use.</p>
-<div class="card">
-<form id="f" autocomplete="off">
-<label>Nearby networks</label>
-<ul class="nets" id="nets"><li class="muted">Searching&hellip;</li></ul>
-<button type="button" class="link" id="rescan">Search again</button>
-<div class="row"><label for="ssid">Network name</label>
-<input id="ssid" name="ssid" maxlength="32" required autocapitalize="none" spellcheck="false"></div>
-<div class="row"><label for="pass">Password</label>
-<div class="pw"><input id="pass" name="pass" type="password" maxlength="64">
-<button type="button" id="show">Show</button></div></div>
-<button class="go" id="go" type="submit">Connect</button>
-</form>
-<div class="msg" id="msg"></div>
-</div>
-<p class="foot" id="foot"></p>
-</main>
-<script>
-var $=function(i){return document.getElementById(i)};
-function esc(s){return s.replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
-function msg(t,c){var m=$('msg');m.className='msg show '+c;m.textContent=t}
-function bars(r){return r>-60?'Strong':r>-72?'Good':'Weak'}
-function scan(){
- fetch('/scan').then(function(r){return r.json()}).then(function(d){
-  if(d.scanning){setTimeout(scan,1500);return}
-  var ul=$('nets');
-  if(!d.networks.length){ul.innerHTML='<li class="muted">No networks found</li>';return}
-  ul.innerHTML='';
-  d.networks.forEach(function(n){
-   var li=document.createElement('li');
-   li.innerHTML='<span class="ssid">'+esc(n.ssid)+'</span><span class="meta">'+bars(n.rssi)+(n.lock?' &#128274;':'')+'</span>';
-   li.onclick=function(){
-    [].forEach.call(ul.children,function(c){c.classList.remove('sel')});
-    li.classList.add('sel');$('ssid').value=n.ssid;$('pass').value='';
-    if(n.lock)$('pass').focus();
-   };
-   ul.appendChild(li);
-  });
- }).catch(function(){setTimeout(scan,2000)});
-}
-$('rescan').onclick=function(){$('nets').innerHTML='<li class="muted">Searching&hellip;</li>';fetch('/scan?fresh=1').then(function(){setTimeout(scan,1500)})};
-$('show').onclick=function(){var p=$('pass');p.type=p.type==='password'?'text':'password';this.textContent=p.type==='password'?'Show':'Hide'};
-var fails=0,ssidSent='';
-function poll(){
- fetch('/status').then(function(r){return r.json()}).then(function(s){
-  fails=0;
-  if(s.state==='connecting'){setTimeout(poll,1000);return}
-  if(s.state==='connected'){
-   msg('Connected to '+ssidSent+'. The panel is online and this hotspot will now close. You can close this page.','ok');return}
-  msg('Could not connect to '+ssidSent+'. Check the password and try again.','err');$('go').disabled=false;
- }).catch(function(){
-  if(++fails>8){msg('The hotspot closed. If the panel connected, it is online now. If this hotspot appears again, the connection failed. Join it and try again.','info');return}
-  setTimeout(poll,1500);
- });
-}
-$('f').onsubmit=function(e){
- e.preventDefault();
- ssidSent=$('ssid').value.trim();if(!ssidSent)return;
- $('go').disabled=true;msg('Connecting to '+ssidSent+'… this takes up to 20 seconds.','info');
- var b=new URLSearchParams();b.append('ssid',ssidSent);b.append('pass',$('pass').value);
- fetch('/connect',{method:'POST',body:b}).then(function(){setTimeout(poll,1500)})
- .catch(function(){msg('Lost contact with the panel. Rejoin its hotspot and try again.','err');$('go').disabled=false});
-};
-scan();
-</script></body></html>
-)HTML";
+static const char PORTAL_HTML_BODY[] PROGMEM =
+  "\n"
+  "<h1>Connect your Breethr</h1>\n"
+  "<p class=\"sub\">Choose the Wi-Fi network this panel should use.</p>\n"
+  "<div class=\"card\">\n"
+  "<form id=\"f\" autocomplete=\"off\">\n"
+  "<label>Nearby networks</label>\n"
+  "<ul class=\"nets\" id=\"nets\"><li class=\"muted\">Searching&hellip;</li></ul>\n"
+  "<button type=\"button\" class=\"link\" id=\"rescan\">Search again</button>\n"
+  "<div class=\"row\"><label for=\"ssid\">Network name</label>\n"
+  "<input id=\"ssid\" name=\"ssid\" maxlength=\"32\" required autocapitalize=\"none\" spellcheck=\"false\"></div>\n"
+  "<div class=\"row\"><label for=\"pass\">Password</label>\n"
+  "<div class=\"pw\"><input id=\"pass\" name=\"pass\" type=\"password\" maxlength=\"64\">\n"
+  "<button type=\"button\" id=\"show\">Show</button></div></div>\n"
+  "<button class=\"go\" id=\"go\" type=\"submit\">Connect</button>\n"
+  "</form>\n"
+  "<div class=\"msg\" id=\"msg\"></div>\n"
+  "</div>\n"
+  "<p class=\"foot\" id=\"foot\"></p>\n"
+  "</main>\n"
+  "<script>\n"
+  "var $=function(i){return document.getElementById(i)};\n"
+  "function esc(s){return s.replace(/[&<>\"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]})}\n"
+  "function msg(t,c){var m=$('msg');m.className='msg show '+c;m.textContent=t}\n"
+  "function bars(r){return r>-60?'Strong':r>-72?'Good':'Weak'}\n"
+  "function scan(){\n"
+  " fetch('/scan').then(function(r){return r.json()}).then(function(d){\n"
+  "  if(d.scanning){setTimeout(scan,1500);return}\n"
+  "  var ul=$('nets');\n"
+  "  if(!d.networks.length){ul.innerHTML='<li class=\"muted\">No networks found</li>';return}\n"
+  "  ul.innerHTML='';\n"
+  "  d.networks.forEach(function(n){\n"
+  "   var li=document.createElement('li');\n"
+  "   li.innerHTML='<span class=\"ssid\">'+esc(n.ssid)+'</span><span class=\"meta\">'+bars(n.rssi)+(n.lock?' &#128274;':'')+'</span>';\n"
+  "   li.onclick=function(){\n"
+  "    [].forEach.call(ul.children,function(c){c.classList.remove('sel')});\n"
+  "    li.classList.add('sel');$('ssid').value=n.ssid;$('pass').value='';\n"
+  "    if(n.lock)$('pass').focus();\n"
+  "   };\n"
+  "   ul.appendChild(li);\n"
+  "  });\n"
+  " }).catch(function(){setTimeout(scan,2000)});\n"
+  "}\n"
+  "$('rescan').onclick=function(){$('nets').innerHTML='<li class=\"muted\">Searching&hellip;</li>';fetch('/scan?fresh=1').then(function(){setTimeout(scan,1500)})};\n"
+  "$('show').onclick=function(){var p=$('pass');p.type=p.type==='password'?'text':'password';this.textContent=p.type==='password'?'Show':'Hide'};\n"
+  "var fails=0,ssidSent='';\n"
+  "function poll(){\n"
+  " fetch('/status').then(function(r){return r.json()}).then(function(s){\n"
+  "  fails=0;\n"
+  "  if(s.state==='connecting'){setTimeout(poll,1000);return}\n"
+  "  if(s.state==='connected'){\n"
+  "   msg('Connected to '+ssidSent+'. The panel is online and this hotspot will now close. You can close this page.','ok');return}\n"
+  "  msg('Could not connect to '+ssidSent+'. Check the password and try again.','err');$('go').disabled=false;\n"
+  " }).catch(function(){\n"
+  "  if(++fails>8){msg('The hotspot closed. If the panel connected, it is online now. If this hotspot appears again, the connection failed. Join it and try again.','info');return}\n"
+  "  setTimeout(poll,1500);\n"
+  " });\n"
+  "}\n"
+  "$('f').onsubmit=function(e){\n"
+  " e.preventDefault();\n"
+  " ssidSent=$('ssid').value.trim();if(!ssidSent)return;\n"
+  " $('go').disabled=true;msg('Connecting to '+ssidSent+'… this takes up to 20 seconds.','info');\n"
+  " var b=new URLSearchParams();b.append('ssid',ssidSent);b.append('pass',$('pass').value);\n"
+  " fetch('/connect',{method:'POST',body:b}).then(function(){setTimeout(poll,1500)})\n"
+  " .catch(function(){msg('Lost contact with the panel. Rejoin its hotspot and try again.','err');$('go').disabled=false});\n"
+  "};\n"
+  "scan();\n"
+  "</script></body></html>\n";
 
 // Last 5 hex digits of the Wi-Fi MAC, e.g. 24:6F:28:AB:CD:EF -> "BCDEF".
 static void makeHotspotName() {
