@@ -35,12 +35,12 @@ Write a hex colour as `0x` + 6 characters, no `#` (e.g. `#EDAB7A` → `0xEDAB7A`
 
 | Line | Setting | Current |
 |------|---------|---------|
-| 154 | `COLOR_OUTDOOR_HIGH` – outdoor first wave | `0xDB6E2A` orange |
+| 154 | `COLOR_OUTDOOR_HIGH` – outdoor first wave | `0xD68354` light orange |
 | 155 | `COLOR_OUTDOOR_LOW` – outdoor second wave | `0xC4A3D6` lilac |
 | 160 / 166 | Temperature left / right | `0xA8CFDA` → `0xABA7EE` |
 | 161 / 167 | Humidity left / right | `0xD3ABC8` → `0xDDB0BE` |
 | 162 / 168 | PM 2.5 left / right | `0xEDAB7A` → `0xEDAB7A` |
-| 163 / 169 | CO2 left / right | `0xF5D969` → `0xF5D969` (solid yellow) |
+| 163 / 169 | CO2 left / right | `0xF5E8AE` → `0xF5E8AE` (solid light yellow) |
 
 Indoor colours fade from the LEFT value to the RIGHT value across the panel.
 For a solid colour, put the same value in both.

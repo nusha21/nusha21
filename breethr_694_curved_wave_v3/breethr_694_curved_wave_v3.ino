@@ -151,7 +151,7 @@ uint32_t lastWifiRetryMs = 0;
 uint32_t lastPersistentSaveMs = 0;
 
 // ================= WAVE COLORS =================
-static constexpr uint32_t COLOR_OUTDOOR_HIGH = 0xDB6E2A; // Orange (#DB6E2A)
+static constexpr uint32_t COLOR_OUTDOOR_HIGH = 0xD68354; // Light orange (#D68354)
 static constexpr uint32_t COLOR_OUTDOOR_LOW = 0xC4A3D6;  // Lilac
 
 // Indoor colours fade from LEFT colour to RIGHT colour across the panel.
@@ -160,13 +160,13 @@ static constexpr uint32_t INDOOR_LEFT[NUM_INDOOR] = {
   0xA8CFDA, // Temperature: Sky
   0xD3ABC8, // Humidity:    Blush
   0xEDAB7A, // PM 2.5:      Apricot
-  0xF5D969  // CO2:         Yellow (#F5D969)
+  0xF5E8AE  // CO2:         Light yellow (#F5E8AE)
 };
 static constexpr uint32_t INDOOR_RIGHT[NUM_INDOOR] = {
   0xABA7EE, // Temperature: Periwinkle
   0xDDB0BE, // Humidity:    Blush
   0xEDAB7A, // PM 2.5:      Apricot
-  0xF5D969  // CO2:         Yellow (#F5D969)
+  0xF5E8AE  // CO2:         Light yellow (#F5E8AE)
 };
 
 static constexpr uint32_t INDOOR_PARAM_MS = INDOOR_FILL_MS + INDOOR_HOLD_MS;
