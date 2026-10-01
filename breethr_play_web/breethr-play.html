@@ -93,7 +93,8 @@
 
   .status {
     min-height: 3em;
-    max-width: 300px;
+    max-width: 340px;
+    overflow-wrap: anywhere;
     margin: 0;
     text-align: center;
     font-size: 16px;
@@ -148,14 +149,28 @@
     button.classList.remove('sent');
     show('Sending…');
     try {
-      const res = await fetch(API_URL, { method: 'POST', cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      let res;
+      try {
+        res = await fetch(API_URL, { method: 'POST', cache: 'no-store' });
+      } catch (networkError) {
+        throw new Error(location.protocol === 'file:'
+          ? 'Could not reach ' + VERCEL_URL + '. Set VERCEL_URL in this file to your Vercel address.'
+          : 'Could not reach the PLAY service. Check your internet connection.');
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 404) {
+          throw new Error('PLAY service not found at ' + API_URL + ' (404). In Vercel, set Root Directory to breethr_play_web and redeploy.');
+        }
+        throw new Error((body.error || 'PLAY service error') + ' (' + res.status + ')');
+      }
       void button.offsetWidth; // restart the ring animation
       button.classList.add('sent');
       show('Sent. The panel starts playing within a few seconds.');
       resetTimer = setTimeout(() => show(IDLE_TEXT), 8000);
     } catch (err) {
-      show('Could not reach the panel service. Check your connection and try again.', true);
+      show(err.message, true);
+      console.error(err);
     } finally {
       button.disabled = false;
     }
