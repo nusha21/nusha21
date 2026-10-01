@@ -58,7 +58,10 @@ static constexpr uint16_t GOOD_HUMIDITY_MAX = 65;   // %RH
 static constexpr uint16_t NUM_LEDS = 694;
 static constexpr uint8_t NUM_ROWS = 15;
 static constexpr uint8_t GRID_X2 = 99; // Half-pitch x coordinate, 0..98.
-static constexpr uint8_t BRIGHTNESS = 96;
+static constexpr uint8_t BRIGHTNESS = 220;  // 0..255. Was 96 (too dull).
+// LEDs are linear, screens are not: without this, pastel hex codes look
+// washed-out / whitish on LEDs. 1.0 = off, 2.2 = like a screen, 2.8 = richer.
+static constexpr float COLOR_GAMMA = 2.4f;
 static constexpr uint16_t MAX_MILLIAMPS = 3000;
 static constexpr float TAU = 6.283185307179586f;
 
@@ -117,6 +120,7 @@ static constexpr uint16_t HTTP_CONNECT_TIMEOUT_MS = 5000;
 static constexpr uint16_t HTTP_READ_TIMEOUT_MS = 5000;
 
 CRGB leds[NUM_LEDS];
+uint8_t gammaTable[256];
 Preferences preferences;
 WiFiClientSecure secureClient;
 
@@ -431,6 +435,7 @@ static void renderCurvedWave(uint32_t now) {
       if (light < 0.025f) continue;
       CRGB color = mixColor(paintAt(scene.base, x), paintAt(scene.top, x),
                             coverAt(scene, x));
+      color = CRGB(gammaTable[color.r], gammaTable[color.g], gammaTable[color.b]);
       color.nscale8(uint8_t(light * 255.0f + 0.5f));
       leds[rowColToIndex(row, col)] = color;
     }
@@ -571,8 +576,10 @@ void setup() {
   FastLED.addLeds<LED_TYPE, LED_DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS);
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS);
-  // Do not apply FastLED color correction: send the supplied palette values
-  // directly, apart from the wave's intentional brightness scaling.
+  for (uint16_t i = 0; i < 256; ++i) {
+    gammaTable[i] = uint8_t(powf(i / 255.0f, COLOR_GAMMA) * 255.0f + 0.5f);
+  }
+  // FastLED's own colour correction stays off; COLOR_GAMMA handles it.
   FastLED.setCorrection(UncorrectedColor);
   FastLED.setDither(false);
   clearPanel();
