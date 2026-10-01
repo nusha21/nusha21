@@ -1,0 +1,11 @@
+{
+  "name": "breethr-play",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.9.9"
+  }
+}
