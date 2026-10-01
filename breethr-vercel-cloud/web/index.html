@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#FDFAF7" />
+    <meta
+      name="description"
+      content="Start the Breethr ambient panel animation through Vercel."
+    />
+    <title>Breethr · Panel control</title>
+    <link rel="icon" type="image/png" href="/assets/breethr-mark.png" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true">
+      <span class="orb orb--sky"></span>
+      <span class="orb orb--rise"></span>
+      <span class="contour contour--one"></span>
+      <span class="contour contour--two"></span>
+    </div>
+
+    <main class="control-shell">
+      <div class="brand" aria-label="Breethr">
+        <img
+          class="brand__mark"
+          src="/assets/breethr-mark.png"
+          alt=""
+          width="430"
+          height="728"
+        />
+        <span class="brand__wordmark">Breethr</span>
+      </div>
+
+      <section class="panel-control" aria-labelledby="control-title">
+        <h1 id="control-title">Ambient panel</h1>
+        <button class="play-button" id="play-button" type="button">
+          <span class="play-button__label">Play animation</span>
+          <span class="play-button__pulse" aria-hidden="true"></span>
+        </button>
+        <p class="status" id="status" role="status" aria-live="polite">
+          Ready through Vercel
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
