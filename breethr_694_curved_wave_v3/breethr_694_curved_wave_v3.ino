@@ -153,6 +153,21 @@ static constexpr uint32_t ANIMATION_CYCLE_MS =
   APRICOT_TOTAL_MS + LILAC_TAKEOVER_MS + LILAC_HOLD_MS +
   NUM_INDOOR * INDOOR_PARAM_MS;
 
+// A "paint" is a colour that may fade from left to right across the panel.
+struct Paint {
+  uint32_t left;
+  uint32_t right;
+};
+
+// One frame of the colour sequence: `top` covers `base` by `cover` (0..1).
+// The covered part starts at the left edge, or at the right edge if fromRight.
+struct Scene {
+  Paint base;
+  Paint top;
+  float progress;
+  bool fromRight;
+};
+
 float curveA[GRID_X2];
 float curveB[GRID_X2];
 uint32_t animationStartMs = 0;
@@ -274,21 +289,6 @@ static void clearPanel() {
 static CRGB colorFromHex(uint32_t hex) {
   return CRGB((hex >> 16) & 0xFF, (hex >> 8) & 0xFF, hex & 0xFF);
 }
-
-// A "paint" is a colour that may fade from left to right across the panel.
-struct Paint {
-  uint32_t left;
-  uint32_t right;
-};
-
-// One frame of the colour sequence: `top` covers `base` by `cover` (0..1).
-// The covered part starts at the left edge, or at the right edge if fromRight.
-struct Scene {
-  Paint base;
-  Paint top;
-  float progress;
-  bool fromRight;
-};
 
 static constexpr Paint BLACK_PAINT = {0x000000, 0x000000};
 static constexpr Paint APRICOT_PAINT = {COLOR_OUTDOOR_HIGH, COLOR_OUTDOOR_HIGH};
