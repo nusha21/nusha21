@@ -41,11 +41,21 @@ async function redis(...command) {
   return data.result;
 }
 
+// Lets the page work when opened as a downloaded file, not only from Vercel.
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+};
+
+export function OPTIONS() {
+  return new Response(null, { status: 204, headers: CORS });
+}
+
 function errorResponse(err) {
   console.error(err);
   return Response.json(
     { error: err.message },
-    { status: 500, headers: { 'Cache-Control': 'no-store' } },
+    { status: 500, headers: { ...CORS, 'Cache-Control': 'no-store' } },
   );
 }
 
@@ -56,6 +66,7 @@ export async function GET() {
       { seq },
       {
         headers: {
+          ...CORS,
           // Cached by Vercel's CDN only; browsers and the panel always ask again.
           'Cache-Control': 'no-store',
           'Vercel-CDN-Cache-Control': `max-age=${CDN_MAX_AGE_SECONDS}`,
@@ -77,7 +88,7 @@ export async function POST() {
       // The panel still picks the press up when the cache expires.
       console.error('Cache purge failed:', err);
     }
-    return Response.json({ seq }, { headers: { 'Cache-Control': 'no-store' } });
+    return Response.json({ seq }, { headers: { ...CORS, 'Cache-Control': 'no-store' } });
   } catch (err) {
     return errorResponse(err);
   }

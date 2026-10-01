@@ -37,3 +37,10 @@ If clearing the cache ever fails, the cache still expires within 60 s.
 - Anyone with the link can press PLAY.
 - The page uses Hanken Grotesk (Google Fonts) as a free stand-in for Lay Grotesk.
   It uses the guide colours Warm White, Breethr Sky, Blues and the logo blue `#073D4D`.
+
+## Downloaded copy
+
+`breethr-play.html` is the same page as a single file you can open straight from your
+computer or phone. Opened that way, it sends PLAY to the address in `VERCEL_URL`
+(near the bottom of the file), so set that to your Vercel address. The web app
+must already be deployed.
